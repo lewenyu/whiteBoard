@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -117,6 +118,7 @@
   <script src="https://unpkg.com/tim-upload-plugin@1.4.3/index.js"></script>
   <script src="https://unpkg.com/tim-profanity-filter-plugin@1.1.0/index.js"></script>
 </head>
+
 <body>
   <div id="board-container"></div>
   <div id="control-panel">
@@ -135,9 +137,9 @@
     <button type="button" data-action="setBrushThin" data-size="24" class="secondary">中笔</button>
     <button type="button" data-action="setBrushThin" data-size="100" class="secondary">粗笔</button>
     <button type="button" data-action="getBoardList" class="secondary">获取白板列表</button>
-    <div id="control-status" class="status">控件已加载。</div>
+    <div id="control-status" class="status">等待外部 init...</div>
   </div>
-  <div id="debug-panel"><strong>TEduBoard Debug</strong>Loading...</div>
+  <div id="debug-panel"><strong>TEduBoard Debug</strong>Waiting for init...</div>
 
   <script>
     (function () {
@@ -147,186 +149,230 @@
       var DEBUG_PANEL_ID = 'debug-panel';
       var CONTROL_PANEL_ID = 'control-panel';
       var CONTROL_STATUS_ID = 'control-status';
-      var DEBUG_INIT_OPTIONS = {
-        classId: 107980015,
-        sdkAppId: 1400091350,
-        userId: '15_8262',
-        userSig: 'eJyrVgrxCdZLrSjILEpVsjI0NTU1MjAw0AGLlqUWKVkpGekZKEH4xSnZiQUFmSlAdSZARZaGxqZQlZkpqXklmWmZYA2GpvEWRmZGME2Z6UCxoAJz05y0Uo8Q7UDfRONMfzN3Y203d-OqPD*LvDTtRJNKM*PcChfnkkSnSFuoxpLMXJCLzM3MTc0tLYxNawEUaDAm'
-      };
+
+      // ⚠️ 已停用：仅用于本地浏览器调试，生产由 Flutter 调用 bridgeApi.init 注入。
+      // 注释期间，?debug=1 自启动也会被禁用，借此验证 init 参数完全来自 Flutter。
+      // var DEBUG_INIT_OPTIONS = {
+      //   classId: 107980015,
+      //   sdkAppId: 1400091350,
+      //   userId: '15_8262',
+      //   userSig: 'eJyrVgrxCdZLrSjILEpVsjI0NTU1MjAw0AGLlqUWKVkpGekZKEH4xSnZiQUFmSlAdSZARZaGxqZQlZkpqXklmWmZYA2GpvEWRmZGME2Z6UCxoAJz05y0Uo8Q7UDfRONMfzN3Y203d-OqPD*LvDTtRJNKM*PcChfnkkSnSFuoxpLMXJCLzM3MTc0tLYxNawEUaDAm'
+      // };
       var DEBUG_TRANSCODE_FILE_URL = 'https://resource.lingshi.com/document/gjnjdt7frd5m9ciq1nvc_tiw/h5/index.html';
       var DEBUG_TRANSCODE_FILE_TITLE = '调试转码文件';
-      // 调试位：true=白板 ready 后自动添加转码文件，false=仅手动点击按钮添加。
       var DEBUG_AUTO_ADD_TRANSCODE_FILE = false;
       var DRAW_MODE_ACTION = 'toggleDrawMode';
       var currentDrawMode = 'pen';
       var bridgeConfig = resolveBridgeConfig();
+
+      // ======================== 运行时状态（按节课切换） ========================
+      // 这些字段全部跟随 bridgeApi.init(options) 的参数变化，保证不同节课互不污染。
       var board = null;
       var boardReady = false;
-
-      // 方法分类规划（仅用于维护可读性，不参与运行逻辑）
-      var METHOD_CATEGORIES = {
-        config: ['resolveBridgeConfig'],
-        debugUI: ['normalizeError', 'stringifyDebugValue', 'updateDebugPanel', 'updateControlStatus'],
-        timRelay: ['initTIM', 'sendSyncDataViaTIM'],
-        boardStateUI: ['updateDrawModeButton', 'updateBrushThinButtons', 'setControlsDisabled'],
-        boardFileOps: ['resolveH5FileType', 'buildDebugTranscodeFileData', 'addDebugTranscodeFile'],
-        boardLifecycle: ['ensureBoardReady', 'bindBoardEvents', 'initBoard', 'destroyBoard'],
-        boardInvoke: ['addSyncData', 'resizeBoard', 'invokeBoardMethod', 'applyDrawMode', 'toggleDrawMode'],
-        controls: ['handleControlAction', 'bindControls'],
-        bridge: ['safely', 'exposeBridge', 'bridgeApi']
-      };
+      var currentInitOptions = null;        // 最近一次成功 init 的 options（脱敏对外暴露）
+      var tim = null;
+      var timReady = false;
+      var timAccount = null;                // { sdkAppId, userId } 记录当前 TIM 登录身份
+      var TIM_GROUP_ID = '';                // 当前白板 IM 群（= String(classId)）
+      var TIM_BOARD_EXT = 'TXWhiteBoardExt';
+      var syncChannel = null;               // 同浏览器多 Tab 的低延迟补充通道
+      var syncChannelName = '';
 
       // ======================== 配置解析 ========================
-      // 优先读取 URL 参数，其次读取运行时注入的配置，最后回退到默认值。
-      // 解析 Flutter 通道与 JS Bridge 名称。
       function resolveBridgeConfig() {
         var search = new URLSearchParams(window.location.search);
         var runtimeConfig = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
 
         return {
           flutterChannel: search.get('flutterChannel') || runtimeConfig.flutterChannel || DEFAULT_FLUTTER_CHANNEL,
-          jsBridge: search.get('jsBridge') || runtimeConfig.jsBridge || DEFAULT_JS_BRIDGE
+          jsBridge: search.get('jsBridge') || runtimeConfig.jsBridge || DEFAULT_JS_BRIDGE,
+          debug: search.get('debug') === '1' || !!runtimeConfig.debug
+        };
+      }
+
+      // ⚠️ 已停用：依赖 DEBUG_INIT_OPTIONS 的调试解析逻辑暂时关闭，
+      // 保留函数体便于以后恢复，但当前直接返回 null。
+      function resolveDebugInitOptions() {
+        // var search = new URLSearchParams(window.location.search);
+        // var runtimeConfig = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
+        // var fromUrl = {
+        //   classId: search.get('classId'),
+        //   sdkAppId: search.get('sdkAppId'),
+        //   userId: search.get('userId'),
+        //   userSig: search.get('userSig')
+        // };
+        // var merged = Object.assign({}, DEBUG_INIT_OPTIONS, runtimeConfig.init || {}, removeNullValues(fromUrl));
+        // merged.classId = toNumberIfPossible(merged.classId);
+        // merged.sdkAppId = toNumberIfPossible(merged.sdkAppId);
+        // return merged;
+        return null;
+      }
+
+      function removeNullValues(o) {
+        var r = {};
+        Object.keys(o).forEach(function (k) {
+          if (o[k] !== null && o[k] !== undefined && o[k] !== '') r[k] = o[k];
+        });
+        return r;
+      }
+
+      function toNumberIfPossible(v) {
+        if (v === null || v === undefined || v === '') return v;
+        var n = Number(v);
+        return Number.isFinite(n) ? n : v;
+      }
+
+      function sanitizeOptionsForLog(options) {
+        if (!options) return null;
+        return {
+          classId: options.classId,
+          sdkAppId: options.sdkAppId,
+          userId: options.userId,
+          userSigPresent: !!options.userSig
         };
       }
 
       // ======================== TIM 信令中转 ========================
-      // ── TIM 信令中转（官网推荐方案） ────────────────────────
       // 通过 TIM 群消息中转白板信令，支持跨浏览器/跨设备实时同步。
       // BroadcastChannel 作为同浏览器内多 Tab 的低延迟补充。
-      var tim = null;
-      var timReady = false;
-      var TIM_GROUP_ID = String(DEBUG_INIT_OPTIONS.classId);
-      var TIM_BOARD_EXT = 'TXWhiteBoardExt';
 
-      var SYNC_CHANNEL_NAME = 'teboard_debug_sync_' + DEBUG_INIT_OPTIONS.classId;
-      var syncChannel = typeof BroadcastChannel !== 'undefined'
-        ? new BroadcastChannel(SYNC_CHANNEL_NAME)
-        : null;
-
-      if (syncChannel) {
+      // 关闭并重建 BroadcastChannel（按 classId 命名，确保不同课不串）。
+      function resetSyncChannel(classId) {
+        if (syncChannel) {
+          try { syncChannel.close(); } catch (e) { }
+          syncChannel = null;
+        }
+        syncChannelName = 'teboard_sync_' + classId;
+        if (typeof BroadcastChannel === 'undefined') return;
+        syncChannel = new BroadcastChannel(syncChannelName);
         syncChannel.onmessage = function (event) {
-          if (board && event.data && event.data.type === 'syncData') {
-            try {
-              board.addSyncData(event.data.payload);
-            } catch (e) {}
-          }
+          if (!board) return;
+          if (!event.data || event.data.type !== 'syncData') return;
+          // 同名通道严格按 classId 隔离，无需再过滤。
+          try { board.addSyncData(event.data.payload); } catch (e) { }
         };
       }
 
-      // 初始化 TIM 实例、登录并绑定收发事件。
-      function initTIM() {
+      // 安全 logout 旧的 TIM 会话（如有）。
+      function teardownTim() {
+        if (!tim) return Promise.resolve();
+        var t = tim;
+        tim = null;
+        timReady = false;
+        timAccount = null;
+        try {
+          // 先尝试退群（失败可忽略）
+          if (TIM_GROUP_ID) {
+            t.quitGroup(TIM_GROUP_ID).catch(function () { });
+          }
+        } catch (e) { }
+        try {
+          return t.logout().catch(function () { });
+        } catch (e) {
+          return Promise.resolve();
+        }
+      }
+
+      // 用新身份初始化 TIM。会先把旧实例 logout，再登录新账号、加入新群。
+      function initTIM(options) {
         if (typeof TIM === 'undefined') {
           updateDebugPanel('TIM SDK 未加载', { hint: '检查网络或 CDN 是否可访问' });
           return;
         }
-
-        tim = TIM.create({ SDKAppID: DEBUG_INIT_OPTIONS.sdkAppId });
-
-        if (typeof TIMUploadPlugin !== 'undefined') {
-          tim.registerPlugin({ 'tim-upload-plugin': TIMUploadPlugin });
-        }
-        if (typeof TIMProfanityFilterPlugin !== 'undefined') {
-          tim.registerPlugin({ 'tim-profanity-filter-plugin': TIMProfanityFilterPlugin });
+        if (!options || !options.sdkAppId || !options.userId || !options.userSig || options.classId === undefined || options.classId === null) {
+          updateDebugPanel('initTIM 参数缺失', sanitizeOptionsForLog(options));
+          return;
         }
 
-        tim.setLogLevel(1);
+        var nextGroupId = String(options.classId);
 
-        // SDK 就绪后标记可用并尝试入群。
-        function handleSdkReady() {
-          timReady = true;
-          updateDebugPanel('TIM 已就绪', {
-            userId: DEBUG_INIT_OPTIONS.userId,
-            groupId: TIM_GROUP_ID,
-            uploadPlugin: typeof TIMUploadPlugin !== 'undefined',
-            profanityFilterPlugin: typeof TIMProfanityFilterPlugin !== 'undefined'
-          });
-          // 加入群组（若已是成员会返回 already 错误，可忽略）
-          tim.joinGroup({ groupID: TIM_GROUP_ID }).catch(function () {});
-        }
+        teardownTim().then(function () {
+          tim = TIM.create({ SDKAppID: Number(options.sdkAppId) });
 
-        // SDK 不可用时同步更新连接状态。
-        function handleSdkNotReady() {
-          timReady = false;
-          updateDebugPanel('TIM 连接断开', {});
-        }
-
-        // 接收群消息并提取白板同步数据。
-        function handleMessageReceived(event) {
-          if (!board) {
-            return;
+          if (typeof TIMUploadPlugin !== 'undefined') {
+            tim.registerPlugin({ 'tim-upload-plugin': TIMUploadPlugin });
+          }
+          if (typeof TIMProfanityFilterPlugin !== 'undefined') {
+            tim.registerPlugin({ 'tim-profanity-filter-plugin': TIMProfanityFilterPlugin });
           }
 
-          var messages = event.data;
-          messages.forEach(function (message) {
-            if (message.conversationType !== TIM.TYPES.CONV_GROUP) { return; }
-            if (message.to !== TIM_GROUP_ID) { return; }
-            if (message.from === DEBUG_INIT_OPTIONS.userId) { return; } // 过滤自己发出的消息
+          tim.setLogLevel(1);
 
-            // 兼容新版 payload API
-            if (message.type === TIM.TYPES.MSG_CUSTOM &&
+          function handleSdkReady() {
+            timReady = true;
+            updateDebugPanel('TIM 已就绪', {
+              userId: options.userId,
+              groupId: nextGroupId,
+              uploadPlugin: typeof TIMUploadPlugin !== 'undefined',
+              profanityFilterPlugin: typeof TIMProfanityFilterPlugin !== 'undefined'
+            });
+            tim.joinGroup({ groupID: nextGroupId }).catch(function () { });
+          }
+
+          function handleSdkNotReady() {
+            timReady = false;
+            updateDebugPanel('TIM 连接断开', {});
+          }
+
+          function handleMessageReceived(event) {
+            if (!board) return;
+            var messages = event.data;
+            messages.forEach(function (message) {
+              if (message.conversationType !== TIM.TYPES.CONV_GROUP) return;
+              if (message.to !== nextGroupId) return;
+              if (message.from === options.userId) return;
+
+              if (message.type === TIM.TYPES.MSG_CUSTOM &&
                 message.payload &&
                 message.payload.extension === TIM_BOARD_EXT) {
-              try {
-                board.addSyncData(JSON.parse(message.payload.data));
-              } catch (e) {}
-              return;
-            }
+                try { board.addSyncData(JSON.parse(message.payload.data)); } catch (e) { }
+                return;
+              }
 
-            // 兼容旧版 getElements API
-            if (typeof message.getElements === 'function') {
-              var elements = message.getElements();
-              elements.forEach(function (element) {
-                if (element.type === 'TIMCustomElem' &&
+              if (typeof message.getElements === 'function') {
+                var elements = message.getElements();
+                elements.forEach(function (element) {
+                  if (element.type === 'TIMCustomElem' &&
                     element.content &&
                     element.content.extension === TIM_BOARD_EXT) {
-                  try {
-                    board.addSyncData(JSON.parse(element.content.data));
-                  } catch (e) {}
-                }
-              });
-            }
-          });
-        }
+                    try { board.addSyncData(JSON.parse(element.content.data)); } catch (e) { }
+                  }
+                });
+              }
+            });
+          }
 
-        tim.on(TIM.EVENT.SDK_READY, handleSdkReady);
-        tim.on(TIM.EVENT.SDK_NOT_READY, handleSdkNotReady);
-        // 接收端：解析白板信令并调用 addSyncData
-        tim.on(TIM.EVENT.MESSAGE_RECEIVED, handleMessageReceived);
+          tim.on(TIM.EVENT.SDK_READY, handleSdkReady);
+          tim.on(TIM.EVENT.SDK_NOT_READY, handleSdkNotReady);
+          tim.on(TIM.EVENT.MESSAGE_RECEIVED, handleMessageReceived);
 
-        tim.login({
-          userID: DEBUG_INIT_OPTIONS.userId,
-          userSig: DEBUG_INIT_OPTIONS.userSig
-        }).then(function () {
-          updateDebugPanel('TIM 登录成功', { userId: DEBUG_INIT_OPTIONS.userId });
-        }).catch(function (err) {
-          updateDebugPanel('TIM 登录失败', { error: err.message });
+          tim.login({ userID: options.userId, userSig: options.userSig })
+            .then(function () {
+              TIM_GROUP_ID = nextGroupId;
+              timAccount = { sdkAppId: Number(options.sdkAppId), userId: options.userId };
+              updateDebugPanel('TIM 登录成功', { userId: options.userId, groupId: nextGroupId });
+            })
+            .catch(function (err) {
+              updateDebugPanel('TIM 登录失败', { error: err && err.message });
+            });
         });
       }
 
-      // 发送端：把 syncData 包装成 TIM 自定义群消息发出去
-      // 把白板同步数据通过 TIM 高优先级群消息发送。
       function sendSyncDataViaTIM(data) {
-        if (!tim || !timReady) { return; }
+        if (!tim || !timReady || !TIM_GROUP_ID) return;
         var message = tim.createCustomMessage({
           to: TIM_GROUP_ID,
           conversationType: TIM.TYPES.CONV_GROUP,
           priority: TIM.TYPES.MSG_PRIORITY_HIGH,
-          payload: {
-            data: JSON.stringify(data),
-            description: '',
-            extension: TIM_BOARD_EXT
-          }
+          payload: { data: JSON.stringify(data), description: '', extension: TIM_BOARD_EXT }
         });
         tim.sendMessage(message).catch(function (err) {
-          updateDebugPanel('TIM 发送失败', { error: err.message });
+          updateDebugPanel('TIM 发送失败', { error: err && err.message });
         });
       }
 
       // ======================== 桥接通信 ========================
-      // Web -> Flutter 的统一出口，Flutter 侧只需要解析一种消息结构。
-      // 统一向 Flutter 发消息，并对 syncData 做多通道转发。
       function postToFlutter(type, payload) {
-        // syncData 同时走 TIM（跨设备）和 BroadcastChannel（同浏览器多 Tab）
         if (type === 'syncData') {
           sendSyncDataViaTIM(payload);
           if (syncChannel) {
@@ -335,9 +381,7 @@
         }
 
         var channel = window[bridgeConfig.flutterChannel];
-        if (!channel || typeof channel.postMessage !== 'function') {
-          return;
-        }
+        if (!channel || typeof channel.postMessage !== 'function') return;
 
         channel.postMessage(JSON.stringify({
           type: type,
@@ -347,82 +391,42 @@
       }
 
       // ======================== 调试与展示工具 ========================
-  // 标准化错误对象，便于 UI 与桥接层统一处理。
       function normalizeError(error) {
-        if (!error) {
-          return { message: 'unknown error' };
-        }
-
-        if (typeof error === 'string') {
-          return { message: error };
-        }
-
-        return {
-          message: error.message || 'unknown error',
-          stack: error.stack || null
-        };
+        if (!error) return { message: 'unknown error' };
+        if (typeof error === 'string') return { message: error };
+        return { message: error.message || 'unknown error', stack: error.stack || null };
       }
 
-      // 把任意值转换成可展示的调试字符串。
       function stringifyDebugValue(value) {
-        if (value === undefined) {
-          return 'undefined';
-        }
-
-        if (typeof value === 'string') {
-          return value;
-        }
-
-        try {
-          return JSON.stringify(value, null, 2);
-        } catch (error) {
-          return String(value);
-        }
+        if (value === undefined) return 'undefined';
+        if (typeof value === 'string') return value;
+        try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
       }
 
-      // 更新右上角调试面板内容。
       function updateDebugPanel(title, details) {
         var panel = document.getElementById(DEBUG_PANEL_ID);
-        if (!panel) {
-          return;
-        }
-
+        if (!panel) return;
         panel.innerHTML = '<strong>' + title + '</strong>' + stringifyDebugValue(details);
       }
 
-      // 更新左上角控制区状态文本。
       function updateControlStatus(title, details) {
         var panel = document.getElementById(CONTROL_STATUS_ID);
-        if (!panel) {
-          return;
-        }
-
+        if (!panel) return;
         panel.textContent = title + '\n' + stringifyDebugValue(details);
       }
 
       // ======================== 白板状态 UI 方法 ========================
-      // 根据当前模式刷新“切换模式”按钮文案。
       function updateDrawModeButton() {
         var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) {
-          return;
-        }
-
+        if (!panel) return;
         var button = panel.querySelector('button[data-action="' + DRAW_MODE_ACTION + '"]');
-        if (!button) {
-          return;
-        }
-
+        if (!button) return;
         button.textContent = currentDrawMode === 'pen' ? '切换到浏览模式' : '切换到画笔模式';
       }
 
-      // 高亮当前生效的笔粗细按钮。
       function updateBrushThinButtons(brushThin) {
         var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) {
-          return;
-        }
-
+        if (!panel) return;
         var buttons = panel.querySelectorAll('button[data-action="setBrushThin"]');
         buttons.forEach(function (button) {
           var size = Number(button.getAttribute('data-size'));
@@ -434,35 +438,25 @@
         });
       }
 
-      // 批量设置控制面板按钮的可用状态。
       function setControlsDisabled(disabled) {
         var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) {
-          return;
-        }
-
+        if (!panel) return;
         var buttons = panel.querySelectorAll('button');
-        buttons.forEach(function (button) {
-          button.disabled = disabled;
-        });
+        buttons.forEach(function (button) { button.disabled = disabled; });
       }
 
       // ======================== 白板绘制模式 ========================
-      // 应用绘制/浏览模式到白板实例并返回当前模式信息。
       function applyDrawMode(mode) {
         ensureBoardReady();
-
         var nextMode = mode === 'browse' ? 'browse' : 'pen';
         currentDrawMode = nextMode;
 
         if (typeof board.setDrawEnable === 'function') {
           board.setDrawEnable(true);
         }
-
         if (typeof board.setDisableDrawActionEvent === 'function') {
           board.setDisableDrawActionEvent(nextMode === 'browse');
         }
-
         if (typeof board.setToolType === 'function' && TEduBoard && TEduBoard.TOOL_TYPE) {
           var toolType = nextMode === 'browse'
             ? TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_MOUSE
@@ -471,14 +465,9 @@
         }
 
         updateDrawModeButton();
-
-        return {
-          mode: nextMode,
-          disableDrawActionEvent: nextMode === 'browse'
-        };
+        return { mode: nextMode, disableDrawActionEvent: nextMode === 'browse' };
       }
 
-      // 在画笔模式和浏览模式之间切换。
       function toggleDrawMode() {
         var nextMode = currentDrawMode === 'pen' ? 'browse' : 'pen';
         var result = applyDrawMode(nextMode);
@@ -487,45 +476,25 @@
       }
 
       // ======================== 调试文件操作 ========================
-      // 兼容不同 SDK 版本，解析可用的 H5 文件类型枚举。
       function resolveH5FileType() {
-        if (!TEduBoard || !TEduBoard.FILE_TYPE) {
-          return null;
-        }
-
+        if (!TEduBoard || !TEduBoard.FILE_TYPE) return null;
         var map = TEduBoard.FILE_TYPE;
-        var candidates = [
-          'TEDU_BOARD_FILE_TYPE_H5',
-          'H5',
-          'TEDU_BOARD_FILE_TYPE_H5PPT',
-          'H5PPT'
-        ];
-
+        var candidates = ['TEDU_BOARD_FILE_TYPE_H5', 'H5', 'TEDU_BOARD_FILE_TYPE_H5PPT', 'H5PPT'];
         for (var i = 0; i < candidates.length; i += 1) {
           if (Object.prototype.hasOwnProperty.call(map, candidates[i])) {
             return map[candidates[i]];
           }
         }
-
         return null;
       }
 
-      // 组装调试转码文件的请求参数。
       function buildDebugTranscodeFileData() {
-        var data = {
-          title: DEBUG_TRANSCODE_FILE_TITLE,
-          url: DEBUG_TRANSCODE_FILE_URL
-        };
-
+        var data = { title: DEBUG_TRANSCODE_FILE_TITLE, url: DEBUG_TRANSCODE_FILE_URL };
         var h5FileType = resolveH5FileType();
-        if (h5FileType !== null && h5FileType !== undefined) {
-          data.fileType = h5FileType;
-        }
-
+        if (h5FileType !== null && h5FileType !== undefined) data.fileType = h5FileType;
         return data;
       }
 
-      // 添加调试转码文件（优先走 H5 模式）并自动切换。
       function addDebugTranscodeFile() {
         ensureBoardReady();
         var payload = buildDebugTranscodeFileData();
@@ -551,8 +520,6 @@
             board.deleteFile(existingFile.fid);
             existingFile = null;
           }
-          // addH5File(url, title, needSwitch, enableDraw)
-          // 对调试 H5 显式开启 enableDraw，否则 H5 文件默认不可涂鸦。
           fileId = board.addH5File(payload.url, payload.title, true, true);
           result = { fileId: fileId, enableDraw: true };
         } else if (typeof board.addTranscodeFile === 'function') {
@@ -576,35 +543,24 @@
           result.drawMode = applyDrawMode(currentDrawMode);
         }
 
-        var response = {
-          method: method,
-          isH5Entry: isH5Entry,
-          request: payload,
-          result: result
-        };
-
+        var response = { method: method, isH5Entry: isH5Entry, request: payload, result: result };
         updateControlStatus('执行成功: addDebugTranscodeFile', response);
         return response;
       }
 
       // ======================== 白板生命周期与调用 ========================
-      // 断言白板实例已初始化，未初始化时抛错。
       function ensureBoardReady() {
-        if (!board) {
-          throw new Error('TEduBoard has not been initialized');
-        }
+        if (!board) throw new Error('TEduBoard has not been initialized');
       }
 
-      // 统一把白板 SDK 的关键事件转发给 Flutter，页面本身不承载业务逻辑。
-      // 绑定白板核心事件并转发到 Flutter 通道。
       function bindBoardEvents() {
         if (TEduBoard.EVENT.TEB_INIT) {
           board.on(TEduBoard.EVENT.TEB_INIT, function () {
             boardReady = true;
             setControlsDisabled(false);
             updateDebugPanel('TEduBoard Ready', {
-              classId: DEBUG_INIT_OPTIONS.classId,
-              userId: DEBUG_INIT_OPTIONS.userId,
+              classId: currentInitOptions && currentInitOptions.classId,
+              userId: currentInitOptions && currentInitOptions.userId,
               boardReady: boardReady
             });
             updateControlStatus('白板已就绪', {
@@ -613,8 +569,8 @@
               brushThin: typeof board.getBrushThin === 'function' ? board.getBrushThin() : null
             });
             postToFlutter('boardReady', {
-              classId: DEBUG_INIT_OPTIONS.classId,
-              userId: DEBUG_INIT_OPTIONS.userId
+              classId: currentInitOptions && currentInitOptions.classId,
+              userId: currentInitOptions && currentInitOptions.userId
             });
 
             updateDrawModeButton();
@@ -624,9 +580,7 @@
             }
 
             if (DEBUG_AUTO_ADD_TRANSCODE_FILE) {
-              try {
-                addDebugTranscodeFile();
-              } catch (error) {
+              try { addDebugTranscodeFile(); } catch (error) {
                 updateControlStatus('执行失败: addDebugTranscodeFile', normalizeError(error));
               }
             }
@@ -665,13 +619,10 @@
         });
       }
 
-      // 初始化时如果已有旧实例，先销毁再重建，避免事件和状态残留。
-      // 创建并初始化 TEduBoard 实例。
       function initBoard(options) {
         if (!window.TEduBoard) {
           throw new Error('TEduBoard SDK is not loaded');
         }
-
         if (!options || !options.classId || !options.sdkAppId || !options.userId || !options.userSig) {
           throw new Error('Missing required init params: classId, sdkAppId, userId, userSig');
         }
@@ -683,23 +634,19 @@
         boardReady = false;
 
         var initParams = Object.assign({}, options, {
-          id: options.id || BOARD_CONTAINER_ID
+          id: options.id || BOARD_CONTAINER_ID,
+          classId: Number(options.classId),
+          sdkAppId: Number(options.sdkAppId)
         });
 
         board = new TEduBoard(initParams);
         window.__DEBUG_BOARD__ = board;
         bindBoardEvents();
 
-        updateDebugPanel('Initializing TEduBoard', {
-          classId: initParams.classId,
-          sdkAppId: initParams.sdkAppId,
-          userId: initParams.userId
-        });
-
+        updateDebugPanel('Initializing TEduBoard', sanitizeOptionsForLog(initParams));
         return { success: true };
       }
 
-      // 销毁白板实例并重置本地状态。
       function destroyBoard() {
         if (board && typeof board.destroy === 'function') {
           board.destroy();
@@ -713,41 +660,31 @@
         return { success: true };
       }
 
-      // 接收外部同步数据并注入白板。
       function addSyncData(data) {
         ensureBoardReady();
         board.addSyncData(data);
         return { success: true };
       }
 
-      // 触发白板容器尺寸重算。
       function resizeBoard() {
         ensureBoardReady();
-        if (typeof board.resize === 'function') {
-          board.resize();
-        }
+        if (typeof board.resize === 'function') board.resize();
         return { success: true };
       }
 
-      // 透传调用白板实例的指定方法。
       function invokeBoardMethod(method, args) {
         ensureBoardReady();
-
         if (!method || typeof board[method] !== 'function') {
           throw new Error('Unsupported board method: ' + method);
         }
-
         var params = Array.isArray(args) ? args : [];
         var result = board[method].apply(board, params);
         return result === undefined ? { success: true } : result;
       }
 
       // ======================== 控件交互 ========================
-      // 处理控制面板按钮动作并调用对应能力。
       function handleControlAction(action, element) {
-        if (!action) {
-          return;
-        }
+        if (!action) return;
 
         try {
           var result;
@@ -789,93 +726,92 @@
         }
       }
 
-      // 绑定控制面板点击事件。
       function bindControls() {
         var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) {
-          return;
-        }
-
+        if (!panel) return;
         setControlsDisabled(true);
-
         panel.addEventListener('click', function (event) {
           var target = event.target;
-          if (!target || target.tagName !== 'BUTTON') {
-            return;
-          }
-
+          if (!target || target.tagName !== 'BUTTON') return;
           handleControlAction(target.getAttribute('data-action'), target);
         });
       }
 
       // ======================== Flutter 桥接 API ========================
-      // Flutter 侧只需要调用这一组桥接 API，不需要直接操作页面内部变量。
       var bridgeApi = {
-        // 初始化白板实例。
+        // 用「这节课」的参数初始化白板 + TIM（不同课次互不污染）。
         init: function (options) {
           return safely('init', function () {
-            return initBoard(options);
+            if (!options || !options.classId || !options.sdkAppId || !options.userId || !options.userSig) {
+              throw new Error('Missing required init params: classId, sdkAppId, userId, userSig');
+            }
+            // 同一节课重复 init 不必反复重建。
+            if (currentInitOptions &&
+              String(currentInitOptions.classId) === String(options.classId) &&
+              String(currentInitOptions.sdkAppId) === String(options.sdkAppId) &&
+              currentInitOptions.userId === options.userId &&
+              boardReady) {
+              return { success: true, reused: true, options: sanitizeOptionsForLog(currentInitOptions) };
+            }
+            // 换课/重进：先把旧的资源销毁干净。
+            destroyBoard();
+            resetSyncChannel(options.classId);
+            initBoard(options);
+            initTIM(options);
+            currentInitOptions = options;
+            return { success: true, options: sanitizeOptionsForLog(options) };
           });
         },
-        // 销毁白板实例。
         destroy: function () {
-        // 统一包装调用结果与异常，方便 Flutter 侧按固定消息结构处理。
-          return safely('destroy', destroyBoard);
-        },
-        // 注入同步数据到白板。
-        addSyncData: function (data) {
-          return safely('addSyncData', function () {
-            return addSyncData(data);
+          return safely('destroy', function () {
+            destroyBoard();
+            teardownTim();
+            if (syncChannel) {
+              try { syncChannel.close(); } catch (e) { }
+              syncChannel = null;
+              syncChannelName = '';
+            }
+            currentInitOptions = null;
+            return { success: true };
           });
         },
-        // 触发白板重排。
+        addSyncData: function (data) {
+          return safely('addSyncData', function () { return addSyncData(data); });
+        },
         resize: function () {
           return safely('resize', resizeBoard);
         },
-        // Flutter 侧通过 invoke 透传常用 TEduBoard 实例方法，避免 HTML 里堆业务分支。
-        // 调用白板实例通用方法。
         invoke: function (method, args) {
-          return safely(method || 'invoke', function () {
-            return invokeBoardMethod(method, args);
-          });
+          return safely(method || 'invoke', function () { return invokeBoardMethod(method, args); });
         },
-        // 动态更新桥接配置并重新暴露入口。
         setBridgeConfig: function (config) {
           bridgeConfig = Object.assign({}, bridgeConfig, config || {});
           exposeBridge();
           return { success: true, bridgeConfig: bridgeConfig };
         },
-        // 返回桥接与白板当前状态快照。
         getState: function () {
           return {
             hasBoard: !!board,
             boardReady: boardReady,
-            bridgeConfig: bridgeConfig
+            bridgeConfig: bridgeConfig,
+            options: sanitizeOptionsForLog(currentInitOptions),
+            tim: { ready: timReady, account: timAccount, groupId: TIM_GROUP_ID, syncChannel: syncChannelName }
           };
         }
       };
 
-      // 统一包装执行结果与错误上报。
       function safely(action, fn) {
         try {
           var result = fn();
-          postToFlutter('methodResult', {
-            action: action,
-            result: result === undefined ? null : result
-          });
+          postToFlutter('methodResult', { action: action, result: result === undefined ? null : result });
           return result;
         } catch (error) {
           var normalizedError = normalizeError(error);
-          postToFlutter('methodError', {
-            action: action,
-            error: normalizedError
-          });
+          postToFlutter('methodError', { action: action, error: normalizedError });
           throw error;
         }
       }
 
-      // Flutter -> Web 的统一入口挂在 window 上，WebView 直接 evaluateJavascript 即可调用。
-      // 挂载桥接 API 到 window 指定名称。
       function exposeBridge() {
         window[bridgeConfig.jsBridge] = bridgeApi;
       }
@@ -883,25 +819,30 @@
       bindControls();
       exposeBridge();
       postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig });
-      updateDebugPanel('Web Bridge Ready', {
-        bridgeConfig: bridgeConfig,
-        autoInit: true
-      });
+      updateDebugPanel('Web Bridge Ready', { bridgeConfig: bridgeConfig, autoInit: false });
 
-      try {
-        initBoard(DEBUG_INIT_OPTIONS);
-        initTIM();
-      } catch (error) {
-        updateDebugPanel('Init Failed', normalizeError(error));
+      // ⚠️ 生产路径：不要在这里调用 initBoard / initTIM。
+      // Flutter 会在收到 webBridgeReady 之后，调用 bridgeApi.init(options) 注入当节课参数。
+      // ⚠️ DEBUG_INIT_OPTIONS 自启动已注释，本节课参数必须由 Flutter 注入，便于排查注入是否成功。
+      // if (bridgeConfig.debug) {
+      //   try {
+      //     var debugOptions = resolveDebugInitOptions();
+      //     updateDebugPanel('Debug auto-init', sanitizeOptionsForLog(debugOptions));
+      //     bridgeApi.init(debugOptions);
+      //   } catch (error) {
+      //     updateDebugPanel('Debug auto-init failed', normalizeError(error));
+      //   }
+      // }
+      if (bridgeConfig.debug) {
+        updateDebugPanel('Debug auto-init disabled', { hint: '取消 DEBUG_INIT_OPTIONS 注释以恢复' });
       }
 
       // 容器尺寸变化时主动通知白板重新布局，避免显示区域错乱。
       window.addEventListener('resize', function () {
-        if (board && typeof board.resize === 'function') {
-          board.resize();
-        }
+        if (board && typeof board.resize === 'function') board.resize();
       });
     })();
   </script>
 </body>
+
 </html>
