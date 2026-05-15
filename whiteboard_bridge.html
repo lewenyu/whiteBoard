@@ -121,7 +121,7 @@
 
 <body>
   <div id="board-container"></div>
-  <div id="control-panel">
+  <!-- <div id="control-panel">
     <button type="button" data-action="addBoard">新增白板页</button>
     <button type="button" data-action="addDebugTranscodeFile" class="secondary">添加调试转码文件</button>
     <button type="button" data-action="toggleDrawMode" class="secondary">切换到浏览模式</button>
@@ -138,7 +138,7 @@
     <button type="button" data-action="setBrushThin" data-size="100" class="secondary">粗笔</button>
     <button type="button" data-action="getBoardList" class="secondary">获取白板列表</button>
     <div id="control-status" class="status">等待外部 init...</div>
-  </div>
+  </div> -->
   <div id="debug-panel"><strong>TEduBoard Debug</strong>Waiting for init...</div>
 
   <script>
@@ -783,6 +783,32 @@
         },
         invoke: function (method, args) {
           return safely(method || 'invoke', function () { return invokeBoardMethod(method, args); });
+        },
+        // ===== flutter层调用能力 =====
+        setDrawMode: function (mode) {
+          return safely('setDrawMode', function () {
+            return applyDrawMode(mode);
+          });
+        },
+        setTool: function (name) {
+          return safely('setTool', function () {
+            ensureBoardReady();
+            if (!TEduBoard || !TEduBoard.TOOL_TYPE) {
+              throw new Error('TEduBoard.TOOL_TYPE unavailable');
+            }
+            var map = {
+              pen: TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_PEN,
+              eraser: TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_ERASER,
+              mouse: TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_MOUSE
+            };
+            var toolType = map[name];
+            if (toolType === undefined) {
+              throw new Error('Unknown tool: ' + name);
+            }
+            board.setToolType(toolType);
+            currentDrawMode = name === 'mouse' ? 'browse' : 'pen';
+            return { tool: name, drawMode: currentDrawMode };
+          });
         },
         setBridgeConfig: function (config) {
           bridgeConfig = Object.assign({}, bridgeConfig, config || {});
