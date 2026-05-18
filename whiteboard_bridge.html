@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>TEduBoard</title>
+  <title>TEduBoard Bridge</title>
   <style>
     html,
     body {
@@ -20,69 +20,8 @@
       height: 100%;
     }
 
-    #control-panel {
-      position: fixed;
-      left: 12px;
-      top: 12px;
-      z-index: 9999;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      width: min(420px, calc(100vw - 24px));
-      padding: 12px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.92);
-      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
-      backdrop-filter: blur(8px);
-    }
-
-    #control-panel button {
-      appearance: none;
-      border: 0;
-      border-radius: 10px;
-      padding: 10px 12px;
-      background: #0f172a;
-      color: #f8fafc;
-      font: 12px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      cursor: pointer;
-    }
-
-    #control-panel button.secondary {
-      background: #334155;
-    }
-
-    #control-panel button.color-red {
-      background: #dc2626;
-    }
-
-    #control-panel button.color-blue {
-      background: #2563eb;
-    }
-
-    #control-panel button.color-green {
-      background: #16a34a;
-    }
-
-    #control-panel button:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-
-    #control-panel button.is-active {
-      outline: 2px solid #0f172a;
-      outline-offset: 2px;
-      box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.12);
-    }
-
-    #control-panel .status {
-      width: 100%;
-      font: 12px/1.5 Menlo, Monaco, Consolas, monospace;
-      color: #334155;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
     #debug-panel {
+      display: none;
       position: fixed;
       top: 12px;
       right: 12px;
@@ -90,7 +29,6 @@
       width: min(420px, calc(100vw - 24px));
       max-height: min(50vh, 420px);
       overflow: auto;
-      box-sizing: border-box;
       padding: 12px 14px;
       border-radius: 12px;
       background: rgba(15, 23, 42, 0.88);
@@ -98,22 +36,21 @@
       font: 12px/1.5 Menlo, Monaco, Consolas, monospace;
       white-space: pre-wrap;
       word-break: break-word;
-      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.28);
-      backdrop-filter: blur(8px);
+    }
+
+    #debug-panel.is-visible {
+      display: block;
     }
 
     #debug-panel strong {
       display: block;
       margin-bottom: 8px;
       color: #f8fafc;
-      font-size: 13px;
     }
   </style>
-  <!-- 运行白板所需的第三方脚本，按 SDK 依赖顺序加载。 -->
   <script src="https://res.qcloudtiw.com/board/third/axios/axios.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/third/cos/5.1.0/cos.min.js"></script>
-  <script src="https://res.qcloudtiw.com/board/2.9.12/TEduBoard.min.js"></script>
-  <!-- TIM JS SDK，用于白板信令的 IM 群消息中转 -->
+  <script src="https://res.qcloudtiw.com/board/2.9.13/TEduBoard.min.js"></script>
   <script src="https://unpkg.com/tim-js-sdk@2.27.6/tim-js.js"></script>
   <script src="https://unpkg.com/tim-upload-plugin@1.4.3/index.js"></script>
   <script src="https://unpkg.com/tim-profanity-filter-plugin@1.1.0/index.js"></script>
@@ -121,105 +58,174 @@
 
 <body>
   <div id="board-container"></div>
-  <!-- <div id="control-panel">
-    <button type="button" data-action="addBoard">新增白板页</button>
-    <button type="button" data-action="addDebugTranscodeFile" class="secondary">添加调试转码文件</button>
-    <button type="button" data-action="toggleDrawMode" class="secondary">切换到浏览模式</button>
-    <button type="button" data-action="setToolType" data-tool="TEDU_BOARD_TOOL_TYPE_PEN">画笔</button>
-    <button type="button" data-action="setToolType" data-tool="TEDU_BOARD_TOOL_TYPE_ERASER">橡皮擦</button>
-    <button type="button" data-action="undo" class="secondary">撤销</button>
-    <button type="button" data-action="redo" class="secondary">重做</button>
-    <button type="button" data-action="clear" class="secondary">清空当前页</button>
-    <button type="button" data-action="setBrushColor" data-color="#dc2626" class="color-red">红笔</button>
-    <button type="button" data-action="setBrushColor" data-color="#2563eb" class="color-blue">蓝笔</button>
-    <button type="button" data-action="setBrushColor" data-color="#16a34a" class="color-green">绿笔</button>
-    <button type="button" data-action="setBrushThin" data-size="4" class="secondary">细笔</button>
-    <button type="button" data-action="setBrushThin" data-size="24" class="secondary">中笔</button>
-    <button type="button" data-action="setBrushThin" data-size="100" class="secondary">粗笔</button>
-    <button type="button" data-action="getBoardList" class="secondary">获取白板列表</button>
-    <div id="control-status" class="status">等待外部 init...</div>
-  </div> -->
-  <div id="debug-panel"><strong>TEduBoard Debug</strong>Waiting for init...</div>
+  <div id="debug-panel"><strong>TEduBoard</strong> loading...</div>
 
   <script>
     (function () {
+      'use strict';
+
+      // =========================================================================
+      // 1. 常量
+      // =========================================================================
       var DEFAULT_FLUTTER_CHANNEL = 'FlutterWhiteboardChannel';
       var DEFAULT_JS_BRIDGE = 'WhiteboardWebBridge';
       var BOARD_CONTAINER_ID = 'board-container';
       var DEBUG_PANEL_ID = 'debug-panel';
-      var CONTROL_PANEL_ID = 'control-panel';
-      var CONTROL_STATUS_ID = 'control-status';
+      var TIM_BOARD_EXT = 'TXWhiteBoardExt';
 
-      // ⚠️ 已停用：仅用于本地浏览器调试，生产由 Flutter 调用 bridgeApi.init 注入。
-      // 注释期间，?debug=1 自启动也会被禁用，借此验证 init 参数完全来自 Flutter。
-      // var DEBUG_INIT_OPTIONS = {
-      //   classId: 107980015,
-      //   sdkAppId: 1400091350,
-      //   userId: '15_8262',
-      //   userSig: 'eJyrVgrxCdZLrSjILEpVsjI0NTU1MjAw0AGLlqUWKVkpGekZKEH4xSnZiQUFmSlAdSZARZaGxqZQlZkpqXklmWmZYA2GpvEWRmZGME2Z6UCxoAJz05y0Uo8Q7UDfRONMfzN3Y203d-OqPD*LvDTtRJNKM*PcChfnkkSnSFuoxpLMXJCLzM3MTc0tLYxNawEUaDAm'
-      // };
-      var DEBUG_TRANSCODE_FILE_URL = 'https://resource.lingshi.com/document/gjnjdt7frd5m9ciq1nvc_tiw/h5/index.html';
-      var DEBUG_TRANSCODE_FILE_TITLE = '调试转码文件';
-      var DEBUG_AUTO_ADD_TRANSCODE_FILE = false;
-      var DRAW_MODE_ACTION = 'toggleDrawMode';
-      var currentDrawMode = 'pen';
+      var TOOL_NAME_MAP = {
+        pen: 'TEDU_BOARD_TOOL_TYPE_PEN',
+        eraser: 'TEDU_BOARD_TOOL_TYPE_ERASER',
+        mouse: 'TEDU_BOARD_TOOL_TYPE_MOUSE'
+      };
+
+      /** 透传到 board.xxx 的方法名（与 Web SDK / iOS LSEduBoardManager 对齐） */
+      var BOARD_INVOKE_METHODS = [
+        'syncAndReload', 'reset', 'setDataSyncEnable', 'getDataSyncEnable',
+        'setDrawEnable', 'isDrawEnable', 'setAccessibleUsers',
+        'setBrushColor', 'setBrushThin', 'setTextColor', 'setTextStyle', 'setTextSize',
+        'setHandwritingEnable', 'setBoardScale', 'getBoardScale',
+        'undo', 'redo', 'clear', 'clearDraws', 'setToolType',
+        'getToolType', 'getBrushColor', 'getBrushThin',
+        'setEraserSize', 'getEraserSize', 'setHighlighterColor', 'getHighlighterColor',
+        'addBoard', 'deleteBoard', 'preBoard', 'nextBoard', 'prevStep', 'nextStep',
+        'getBoardList', 'getCurrentBoard', 'refresh',
+        'setBoardContentFitMode', 'getBoardContentFitMode',
+        'setBoardRatio', 'getBoardRatio', 'setBoardRemark', 'getBoardRemark',
+        'setBackgroundH5', 'setBackgroundColor', 'setGlobalBackgroundColor',
+        'getBackgroundColor', 'getGlobalBackgroundColor', 'setGlobalBackgroundPic', 'getGlobalBackgroundPic',
+        'addTranscodeFile', 'deleteFile', 'addH5File', 'addVideoFile', 'addImagesFile', 'addElement',
+        'getFileInfoList', 'getFileBoardList', 'getCurrentFile', 'getThumbnail',
+        'showVideoControl', 'playVideo', 'pauseVideo', 'seekVideo',
+        'setSyncVideoStatusEnable', 'startSyncVideoStatus', 'stopSyncVideoStatus',
+        'playAudio', 'pauseAudio', 'seekAudio', 'setAudioVolume', 'getAudioVolume',
+        'muteAudio', 'setSyncAudioStatusEnable',
+        'removeElement', 'getElementList', 'getElementById', 'setElementById',
+        'snapshot', 'exportBoardData'
+      ];
+
+      /** TEduBoard.EVENT -> Flutter postMessage.type */
+      var EVENT_FLUTTER_TYPE_MAP = {
+        TEB_INIT: 'boardReady',
+        TEB_ERROR: 'boardError',
+        TEB_WARNING: 'boardWarning',
+        TEB_SYNCDATA: 'syncData',
+        TEB_HISTROYDATA_SYNCCOMPLETED: 'historyDataSyncCompleted',
+        TEB_OFFLINE: 'boardOffline',
+        TEB_ADDBOARD: 'addBoard',
+        TEB_DELETEBOARD: 'deleteBoard',
+        TEB_GOTOBOARD: 'gotoBoard',
+        TEB_GOTOSTEP: 'gotoStep',
+        TEB_REFRESH: 'boardRefresh',
+        TEB_UNDOSTATUSCHANGED: 'undoStatusChanged',
+        TEB_REDOSTATUSCHANGED: 'redoStatusChanged',
+        TEB_IMAGESTATUSCHANGED: 'imageStatusChanged',
+        TEB_SETBACKGROUNDIMAGE: 'setBackgroundImage',
+        TEB_BACKGROUNDH5STATUSCHANGED: 'backgroundH5StatusChanged',
+        TEB_ADDELEMENT: 'addElement',
+        TEB_FILETRANSCODEPROGRESS: 'fileTranscodeProgress',
+        TEB_ADDTRANSCODEFILE: 'addTranscodeFile',
+        TEB_DELETEFILE: 'deleteFile',
+        TEB_SWITCHFILE: 'switchFile',
+        TEB_FILEUPLOADPROGRESS: 'fileUploadProgress',
+        TEB_FILEUPLOADSTATUS: 'fileUploadStatus',
+        TEB_H5FILESTATUSCHANGED: 'h5FileStatusChanged',
+        TEB_VIDEOSTATUSCHANGED: 'videoStatusChanged',
+        TEB_H5PPTMEDIASTATUSCHANGED: 'h5PptMediaStatusChanged',
+        TEB_H5PPTSTATUSCHANGED: 'h5PptStatusChanged',
+        TEB_ADDIMAGESFILE: 'addImagesFile',
+        TEB_RECTSELECTED: 'rectSelected',
+        TEB_ADDIMAGEELEMENT: 'addImageElement',
+        TEB_SNAPSHOT: 'snapshot',
+        TEB_AUDIOSTATUSCHANGED: 'audioStatusChanged',
+        TEB_ZOOMSTATUSCHANGED: 'zoomStatusChanged',
+        TEB_BOARDREMARKCHANGED: 'boardRemarkChanged',
+        TEB_BOARDSCROLLCHANGED: 'boardScrollChanged',
+        TEB_MOUSEMOVE: 'mouseMove',
+        TEB_ELEMENTPOSITIONCHANGED: 'elementPositionChanged',
+        TEB_ELEMENTDELETED: 'elementDeleted',
+        TEB_MATHGRAPHSTATUSCHANGED: 'mathGraphStatusChanged',
+        TEB_TEXTCOMPONENTSTATUSCHANGED: 'textComponentStatusChanged',
+        TEB_TEXTWARN: 'textWarn'
+      };
+
+      var EVENT_PAYLOAD_MAPPERS = {
+        TEB_ERROR: function (code, msg) { return { code: code, message: msg }; },
+        TEB_WARNING: function (code, msg) { return { code: code, message: msg }; },
+        TEB_UNDOSTATUSCHANGED: function (canUndo) { return { canUndo: !!canUndo }; },
+        TEB_REDOSTATUSCHANGED: function (canRedo) { return { canRedo: !!canRedo }; },
+        TEB_ADDBOARD: function (boardIds, fileId) { return { boardIds: boardIds, fileId: fileId || null }; },
+        TEB_DELETEBOARD: function (boardIds, fileId) { return { boardIds: boardIds, fileId: fileId || null }; },
+        TEB_GOTOBOARD: function (boardId, fileId, userId) {
+          return { boardId: boardId, fileId: fileId || null, userId: userId || null };
+        },
+        TEB_GOTOSTEP: function (currentStep, totalStep) {
+          return { currentStep: currentStep, totalStep: totalStep };
+        },
+        TEB_IMAGESTATUSCHANGED: function (boardId, url, status) {
+          return { boardId: boardId, url: url, status: status };
+        },
+        TEB_SETBACKGROUNDIMAGE: function (url) { return { url: url }; },
+        TEB_BACKGROUNDH5STATUSCHANGED: function (boardId, url, status) {
+          return { boardId: boardId, url: url, status: status };
+        },
+        TEB_ADDELEMENT: function (elementId, url) { return { elementId: elementId, url: url }; },
+        TEB_ADDTRANSCODEFILE: function (fileId) { return { fileId: fileId }; },
+        TEB_DELETEFILE: function (fileId) { return { fileId: fileId }; },
+        TEB_SWITCHFILE: function (fileId) { return { fileId: fileId }; },
+        TEB_FILEUPLOADPROGRESS: function (fileId, currentBytes, totalBytes, uploadSpeed, percent) {
+          return { fileId: fileId, currentBytes: currentBytes, totalBytes: totalBytes, uploadSpeed: uploadSpeed, percent: percent };
+        },
+        TEB_FILEUPLOADSTATUS: function (fileId, status, errorCode, errorMsg) {
+          return { fileId: fileId, status: status, errorCode: errorCode, errorMsg: errorMsg };
+        },
+        TEB_H5FILESTATUSCHANGED: function (fileId, status) { return { fileId: fileId, status: status }; },
+        TEB_VIDEOSTATUSCHANGED: function (fileId, status, progress, duration) {
+          return { fileId: fileId, status: status, progress: progress, duration: duration };
+        },
+        TEB_H5PPTMEDIASTATUSCHANGED: function (fileId, mediaId, status) {
+          return { fileId: fileId, mediaId: mediaId, status: status };
+        },
+        TEB_H5PPTSTATUSCHANGED: function (fileId, status, message) {
+          return { fileId: fileId, status: status, message: message || null };
+        },
+        TEB_ADDIMAGESFILE: function (fileId) { return { fileId: fileId }; },
+        TEB_ADDIMAGEELEMENT: function (url) { return { url: url }; },
+        TEB_SNAPSHOT: function (path, errorCode, errorMsg) {
+          return { path: path, errorCode: errorCode, errorMsg: errorMsg };
+        },
+        TEB_AUDIOSTATUSCHANGED: function (elementId, status, progress, duration) {
+          return { elementId: elementId, status: status, progress: progress, duration: duration };
+        }
+      };
+
+      // =========================================================================
+      // 2. 运行时状态
+      // =========================================================================
       var bridgeConfig = resolveBridgeConfig();
-
-      // ======================== 运行时状态（按节课切换） ========================
-      // 这些字段全部跟随 bridgeApi.init(options) 的参数变化，保证不同节课互不污染。
       var board = null;
       var boardReady = false;
-      var currentInitOptions = null;        // 最近一次成功 init 的 options（脱敏对外暴露）
+      var currentDrawMode = 'pen';
+      var currentInitOptions = null;
       var tim = null;
       var timReady = false;
-      var timAccount = null;                // { sdkAppId, userId } 记录当前 TIM 登录身份
-      var TIM_GROUP_ID = '';                // 当前白板 IM 群（= String(classId)）
-      var TIM_BOARD_EXT = 'TXWhiteBoardExt';
-      var syncChannel = null;               // 同浏览器多 Tab 的低延迟补充通道
+      var timAccount = null;
+      var TIM_GROUP_ID = '';
+      var syncChannel = null;
       var syncChannelName = '';
 
-      // ======================== 配置解析 ========================
+      // =========================================================================
+      // 3. 工具函数
+      // =========================================================================
       function resolveBridgeConfig() {
         var search = new URLSearchParams(window.location.search);
-        var runtimeConfig = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
-
+        var runtime = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
+        var debug = search.get('debug') === '1' || !!runtime.debug;
         return {
-          flutterChannel: search.get('flutterChannel') || runtimeConfig.flutterChannel || DEFAULT_FLUTTER_CHANNEL,
-          jsBridge: search.get('jsBridge') || runtimeConfig.jsBridge || DEFAULT_JS_BRIDGE,
-          debug: search.get('debug') === '1' || !!runtimeConfig.debug
+          flutterChannel: search.get('flutterChannel') || runtime.flutterChannel || DEFAULT_FLUTTER_CHANNEL,
+          jsBridge: search.get('jsBridge') || runtime.jsBridge || DEFAULT_JS_BRIDGE,
+          debug: debug
         };
-      }
-
-      // ⚠️ 已停用：依赖 DEBUG_INIT_OPTIONS 的调试解析逻辑暂时关闭，
-      // 保留函数体便于以后恢复，但当前直接返回 null。
-      function resolveDebugInitOptions() {
-        // var search = new URLSearchParams(window.location.search);
-        // var runtimeConfig = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
-        // var fromUrl = {
-        //   classId: search.get('classId'),
-        //   sdkAppId: search.get('sdkAppId'),
-        //   userId: search.get('userId'),
-        //   userSig: search.get('userSig')
-        // };
-        // var merged = Object.assign({}, DEBUG_INIT_OPTIONS, runtimeConfig.init || {}, removeNullValues(fromUrl));
-        // merged.classId = toNumberIfPossible(merged.classId);
-        // merged.sdkAppId = toNumberIfPossible(merged.sdkAppId);
-        // return merged;
-        return null;
-      }
-
-      function removeNullValues(o) {
-        var r = {};
-        Object.keys(o).forEach(function (k) {
-          if (o[k] !== null && o[k] !== undefined && o[k] !== '') r[k] = o[k];
-        });
-        return r;
-      }
-
-      function toNumberIfPossible(v) {
-        if (v === null || v === undefined || v === '') return v;
-        var n = Number(v);
-        return Number.isFinite(n) ? n : v;
       }
 
       function sanitizeOptionsForLog(options) {
@@ -232,11 +238,94 @@
         };
       }
 
-      // ======================== TIM 信令中转 ========================
-      // 通过 TIM 群消息中转白板信令，支持跨浏览器/跨设备实时同步。
-      // BroadcastChannel 作为同浏览器内多 Tab 的低延迟补充。
+      function normalizeError(error) {
+        if (!error) return { message: 'unknown error' };
+        if (typeof error === 'string') return { message: error };
+        return { message: error.message || 'unknown error', stack: error.stack || null };
+      }
 
-      // 关闭并重建 BroadcastChannel（按 classId 命名，确保不同课不串）。
+      function stringifyValue(value) {
+        if (value === undefined) return 'undefined';
+        if (typeof value === 'string') return value;
+        try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+      }
+
+      function updateDebugPanel(title, details) {
+        if (!bridgeConfig.debug) return;
+        var panel = document.getElementById(DEBUG_PANEL_ID);
+        if (!panel) return;
+        panel.innerHTML = '<strong>' + title + '</strong>' + stringifyValue(details);
+      }
+
+      function mapEventPayload(eventKey, args) {
+        var mapper = EVENT_PAYLOAD_MAPPERS[eventKey];
+        if (mapper) return mapper.apply(null, args);
+        if (!args || !args.length) return null;
+        if (args.length === 1) return args[0];
+        return { args: args };
+      }
+
+      function resolveFlutterEventType(eventKey) {
+        if (EVENT_FLUTTER_TYPE_MAP[eventKey]) return EVENT_FLUTTER_TYPE_MAP[eventKey];
+        return eventKey.replace(/^TEB_/, '').toLowerCase().replace(/_([a-z])/g, function (_, c) {
+          return c.toUpperCase();
+        });
+      }
+
+      function pickSdkConstants(keys) {
+        var out = {};
+        if (!TEduBoard) return out;
+        keys.forEach(function (key) {
+          if (TEduBoard[key]) out[key] = TEduBoard[key];
+        });
+        return out;
+      }
+
+      function tryBoardGet(methodNames) {
+        for (var i = 0; i < methodNames.length; i += 1) {
+          var fn = methodNames[i];
+          if (typeof board[fn] === 'function') {
+            try { return board[fn](); } catch (e) { }
+          }
+        }
+        return null;
+      }
+
+      // =========================================================================
+      // 4. Flutter 通信
+      // =========================================================================
+      function postToFlutter(type, payload) {
+        if (type === 'syncData') {
+          sendSyncDataViaTIM(payload);
+          if (syncChannel) {
+            syncChannel.postMessage({ type: 'syncData', payload: payload });
+          }
+        }
+
+        var channel = window[bridgeConfig.flutterChannel];
+        if (!channel || typeof channel.postMessage !== 'function') return;
+
+        channel.postMessage(JSON.stringify({
+          type: type,
+          payload: payload == null ? null : payload,
+          timestamp: Date.now()
+        }));
+      }
+
+      function safely(action, fn) {
+        try {
+          var result = fn();
+          postToFlutter('methodResult', { action: action, result: result === undefined ? null : result });
+          return result;
+        } catch (error) {
+          postToFlutter('methodError', { action: action, error: normalizeError(error) });
+          throw error;
+        }
+      }
+
+      // =========================================================================
+      // 5. TIM 信令（classId = 群 ID）
+      // =========================================================================
       function resetSyncChannel(classId) {
         if (syncChannel) {
           try { syncChannel.close(); } catch (e) { }
@@ -246,14 +335,11 @@
         if (typeof BroadcastChannel === 'undefined') return;
         syncChannel = new BroadcastChannel(syncChannelName);
         syncChannel.onmessage = function (event) {
-          if (!board) return;
-          if (!event.data || event.data.type !== 'syncData') return;
-          // 同名通道严格按 classId 隔离，无需再过滤。
+          if (!board || !event.data || event.data.type !== 'syncData') return;
           try { board.addSyncData(event.data.payload); } catch (e) { }
         };
       }
 
-      // 安全 logout 旧的 TIM 会话（如有）。
       function teardownTim() {
         if (!tim) return Promise.resolve();
         var t = tim;
@@ -261,11 +347,9 @@
         timReady = false;
         timAccount = null;
         try {
-          // 先尝试退群（失败可忽略）
-          if (TIM_GROUP_ID) {
-            t.quitGroup(TIM_GROUP_ID).catch(function () { });
-          }
+          if (TIM_GROUP_ID) t.quitGroup(TIM_GROUP_ID).catch(function () { });
         } catch (e) { }
+        TIM_GROUP_ID = '';
         try {
           return t.logout().catch(function () { });
         } catch (e) {
@@ -273,13 +357,13 @@
         }
       }
 
-      // 用新身份初始化 TIM。会先把旧实例 logout，再登录新账号、加入新群。
       function initTIM(options) {
         if (typeof TIM === 'undefined') {
-          updateDebugPanel('TIM SDK 未加载', { hint: '检查网络或 CDN 是否可访问' });
+          updateDebugPanel('TIM SDK 未加载', {});
           return;
         }
-        if (!options || !options.sdkAppId || !options.userId || !options.userSig || options.classId === undefined || options.classId === null) {
+        if (!options || !options.sdkAppId || !options.userId || !options.userSig ||
+          options.classId === undefined || options.classId === null) {
           updateDebugPanel('initTIM 参数缺失', sanitizeOptionsForLog(options));
           return;
         }
@@ -295,62 +379,48 @@
           if (typeof TIMProfanityFilterPlugin !== 'undefined') {
             tim.registerPlugin({ 'tim-profanity-filter-plugin': TIMProfanityFilterPlugin });
           }
-
           tim.setLogLevel(1);
 
-          function handleSdkReady() {
+          tim.on(TIM.EVENT.SDK_READY, function () {
             timReady = true;
-            updateDebugPanel('TIM 已就绪', {
-              userId: options.userId,
-              groupId: nextGroupId,
-              uploadPlugin: typeof TIMUploadPlugin !== 'undefined',
-              profanityFilterPlugin: typeof TIMProfanityFilterPlugin !== 'undefined'
-            });
+            updateDebugPanel('TIM ready', { groupId: nextGroupId, userId: options.userId });
             tim.joinGroup({ groupID: nextGroupId }).catch(function () { });
-          }
+          });
 
-          function handleSdkNotReady() {
+          tim.on(TIM.EVENT.SDK_NOT_READY, function () {
             timReady = false;
-            updateDebugPanel('TIM 连接断开', {});
-          }
+          });
 
-          function handleMessageReceived(event) {
+          tim.on(TIM.EVENT.MESSAGE_RECEIVED, function (event) {
             if (!board) return;
-            var messages = event.data;
-            messages.forEach(function (message) {
+            event.data.forEach(function (message) {
               if (message.conversationType !== TIM.TYPES.CONV_GROUP) return;
-              if (message.to !== nextGroupId) return;
-              if (message.from === options.userId) return;
+              if (message.to !== nextGroupId || message.from === options.userId) return;
+
+              var applyPayload = function (raw) {
+                try { board.addSyncData(JSON.parse(raw)); } catch (e) { }
+              };
 
               if (message.type === TIM.TYPES.MSG_CUSTOM &&
-                message.payload &&
-                message.payload.extension === TIM_BOARD_EXT) {
-                try { board.addSyncData(JSON.parse(message.payload.data)); } catch (e) { }
+                message.payload && message.payload.extension === TIM_BOARD_EXT) {
+                applyPayload(message.payload.data);
                 return;
               }
-
               if (typeof message.getElements === 'function') {
-                var elements = message.getElements();
-                elements.forEach(function (element) {
+                message.getElements().forEach(function (element) {
                   if (element.type === 'TIMCustomElem' &&
-                    element.content &&
-                    element.content.extension === TIM_BOARD_EXT) {
-                    try { board.addSyncData(JSON.parse(element.content.data)); } catch (e) { }
+                    element.content && element.content.extension === TIM_BOARD_EXT) {
+                    applyPayload(element.content.data);
                   }
                 });
               }
             });
-          }
-
-          tim.on(TIM.EVENT.SDK_READY, handleSdkReady);
-          tim.on(TIM.EVENT.SDK_NOT_READY, handleSdkNotReady);
-          tim.on(TIM.EVENT.MESSAGE_RECEIVED, handleMessageReceived);
+          });
 
           tim.login({ userID: options.userId, userSig: options.userSig })
             .then(function () {
               TIM_GROUP_ID = nextGroupId;
               timAccount = { sdkAppId: Number(options.sdkAppId), userId: options.userId };
-              updateDebugPanel('TIM 登录成功', { userId: options.userId, groupId: nextGroupId });
             })
             .catch(function (err) {
               updateDebugPanel('TIM 登录失败', { error: err && err.message });
@@ -371,305 +441,11 @@
         });
       }
 
-      // ======================== 桥接通信 ========================
-      function postToFlutter(type, payload) {
-        if (type === 'syncData') {
-          sendSyncDataViaTIM(payload);
-          if (syncChannel) {
-            syncChannel.postMessage({ type: 'syncData', payload: payload });
-          }
-        }
-
-        var channel = window[bridgeConfig.flutterChannel];
-        if (!channel || typeof channel.postMessage !== 'function') return;
-
-        channel.postMessage(JSON.stringify({
-          type: type,
-          payload: payload || null,
-          timestamp: Date.now()
-        }));
-      }
-
-      // ======================== 调试与展示工具 ========================
-      function normalizeError(error) {
-        if (!error) return { message: 'unknown error' };
-        if (typeof error === 'string') return { message: error };
-        return { message: error.message || 'unknown error', stack: error.stack || null };
-      }
-
-      function stringifyDebugValue(value) {
-        if (value === undefined) return 'undefined';
-        if (typeof value === 'string') return value;
-        try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
-      }
-
-      function updateDebugPanel(title, details) {
-        var panel = document.getElementById(DEBUG_PANEL_ID);
-        if (!panel) return;
-        panel.innerHTML = '<strong>' + title + '</strong>' + stringifyDebugValue(details);
-      }
-
-      function updateControlStatus(title, details) {
-        var panel = document.getElementById(CONTROL_STATUS_ID);
-        if (!panel) return;
-        panel.textContent = title + '\n' + stringifyDebugValue(details);
-      }
-
-      // ======================== 白板状态 UI 方法 ========================
-      function updateDrawModeButton() {
-        var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) return;
-        var button = panel.querySelector('button[data-action="' + DRAW_MODE_ACTION + '"]');
-        if (!button) return;
-        button.textContent = currentDrawMode === 'pen' ? '切换到浏览模式' : '切换到画笔模式';
-      }
-
-      function updateBrushThinButtons(brushThin) {
-        var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) return;
-        var buttons = panel.querySelectorAll('button[data-action="setBrushThin"]');
-        buttons.forEach(function (button) {
-          var size = Number(button.getAttribute('data-size'));
-          if (size === Number(brushThin)) {
-            button.classList.add('is-active');
-          } else {
-            button.classList.remove('is-active');
-          }
-        });
-      }
-
-      function setControlsDisabled(disabled) {
-        var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) return;
-        var buttons = panel.querySelectorAll('button');
-        buttons.forEach(function (button) { button.disabled = disabled; });
-      }
-
-      // ======================== 白板绘制模式 ========================
-      function applyDrawMode(mode) {
-        ensureBoardReady();
-        var nextMode = mode === 'browse' ? 'browse' : 'pen';
-        currentDrawMode = nextMode;
-
-        if (typeof board.setDrawEnable === 'function') {
-          board.setDrawEnable(true);
-        }
-        if (typeof board.setDisableDrawActionEvent === 'function') {
-          board.setDisableDrawActionEvent(nextMode === 'browse');
-        }
-        if (typeof board.setToolType === 'function' && TEduBoard && TEduBoard.TOOL_TYPE) {
-          var toolType = nextMode === 'browse'
-            ? TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_MOUSE
-            : TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_PEN;
-          board.setToolType(toolType);
-        }
-
-        updateDrawModeButton();
-        return { mode: nextMode, disableDrawActionEvent: nextMode === 'browse' };
-      }
-
-      function toggleDrawMode() {
-        var nextMode = currentDrawMode === 'pen' ? 'browse' : 'pen';
-        var result = applyDrawMode(nextMode);
-        updateControlStatus('执行成功: toggleDrawMode', result);
-        return result;
-      }
-
-      // ======================== 调试文件操作 ========================
-      function resolveH5FileType() {
-        if (!TEduBoard || !TEduBoard.FILE_TYPE) return null;
-        var map = TEduBoard.FILE_TYPE;
-        var candidates = ['TEDU_BOARD_FILE_TYPE_H5', 'H5', 'TEDU_BOARD_FILE_TYPE_H5PPT', 'H5PPT'];
-        for (var i = 0; i < candidates.length; i += 1) {
-          if (Object.prototype.hasOwnProperty.call(map, candidates[i])) {
-            return map[candidates[i]];
-          }
-        }
-        return null;
-      }
-
-      function buildDebugTranscodeFileData() {
-        var data = { title: DEBUG_TRANSCODE_FILE_TITLE, url: DEBUG_TRANSCODE_FILE_URL };
-        var h5FileType = resolveH5FileType();
-        if (h5FileType !== null && h5FileType !== undefined) data.fileType = h5FileType;
-        return data;
-      }
-
-      function addDebugTranscodeFile() {
-        ensureBoardReady();
-        var payload = buildDebugTranscodeFileData();
-        var method = null;
-        var result;
-        var fileId = null;
-        var isH5Entry = /\/h5\/index\.html(?:\?.*)?$/i.test(payload.url) || /\.html(?:\?.*)?$/i.test(payload.url);
-        var existingFile = null;
-
-        if (typeof board.getFileInfoList === 'function') {
-          var fileInfoList = board.getFileInfoList() || [];
-          for (var index = 0; index < fileInfoList.length; index += 1) {
-            if (fileInfoList[index].downloadURL === payload.url) {
-              existingFile = fileInfoList[index];
-              break;
-            }
-          }
-        }
-
-        if (isH5Entry && typeof board.addH5File === 'function') {
-          method = 'addH5File';
-          if (existingFile && existingFile.h5FileEnableDraw === false && typeof board.deleteFile === 'function') {
-            board.deleteFile(existingFile.fid);
-            existingFile = null;
-          }
-          fileId = board.addH5File(payload.url, payload.title, true, true);
-          result = { fileId: fileId, enableDraw: true };
-        } else if (typeof board.addTranscodeFile === 'function') {
-          method = 'addTranscodeFile';
-          fileId = board.addTranscodeFile(payload);
-          result = { fileId: fileId };
-        } else if (typeof board.addH5File === 'function') {
-          method = 'addH5File';
-          fileId = board.addH5File(payload.url, payload.title, true, true);
-          result = { fileId: fileId, enableDraw: true };
-        } else {
-          throw new Error('Unsupported board methods: addTranscodeFile/addH5File');
-        }
-
-        if (fileId && typeof board.switchFile === 'function') {
-          board.switchFile(fileId);
-          result.switched = true;
-        }
-
-        if (isH5Entry) {
-          result.drawMode = applyDrawMode(currentDrawMode);
-        }
-
-        var response = { method: method, isH5Entry: isH5Entry, request: payload, result: result };
-        updateControlStatus('执行成功: addDebugTranscodeFile', response);
-        return response;
-      }
-
-      // ======================== 白板生命周期与调用 ========================
+      // =========================================================================
+      // 6. TEduBoard 核心
+      // =========================================================================
       function ensureBoardReady() {
         if (!board) throw new Error('TEduBoard has not been initialized');
-      }
-
-      function bindBoardEvents() {
-        if (TEduBoard.EVENT.TEB_INIT) {
-          board.on(TEduBoard.EVENT.TEB_INIT, function () {
-            boardReady = true;
-            setControlsDisabled(false);
-            updateDebugPanel('TEduBoard Ready', {
-              classId: currentInitOptions && currentInitOptions.classId,
-              userId: currentInitOptions && currentInitOptions.userId,
-              boardReady: boardReady
-            });
-            updateControlStatus('白板已就绪', {
-              toolType: typeof board.getToolType === 'function' ? board.getToolType() : null,
-              drawMode: currentDrawMode,
-              brushThin: typeof board.getBrushThin === 'function' ? board.getBrushThin() : null
-            });
-            postToFlutter('boardReady', {
-              classId: currentInitOptions && currentInitOptions.classId,
-              userId: currentInitOptions && currentInitOptions.userId
-            });
-
-            updateDrawModeButton();
-            applyDrawMode(currentDrawMode);
-            if (typeof board.getBrushThin === 'function') {
-              updateBrushThinButtons(board.getBrushThin());
-            }
-
-            if (DEBUG_AUTO_ADD_TRANSCODE_FILE) {
-              try { addDebugTranscodeFile(); } catch (error) {
-                updateControlStatus('执行失败: addDebugTranscodeFile', normalizeError(error));
-              }
-            }
-          });
-        }
-
-        board.on(TEduBoard.EVENT.TEB_ERROR, function (code, msg) {
-          updateDebugPanel('TEduBoard Error', { code: code, message: msg });
-          postToFlutter('boardError', { code: code, message: msg });
-        });
-
-        board.on(TEduBoard.EVENT.TEB_WARNING, function (code, msg) {
-          updateDebugPanel('TEduBoard Warning', { code: code, message: msg });
-          postToFlutter('boardWarning', { code: code, message: msg });
-        });
-
-        // Web SDK 的白板信令回调交给 Flutter，由 Flutter 统一走 IM 转发。
-        board.on(TEduBoard.EVENT.TEB_SYNCDATA, function (data) {
-          postToFlutter('syncData', data);
-        });
-
-        board.on(TEduBoard.EVENT.TEB_HISTROYDATA_SYNCCOMPLETED, function () {
-          postToFlutter('historyDataSyncCompleted');
-        });
-
-        board.on(TEduBoard.EVENT.TEB_ADDBOARD, function (boardIds, fileId) {
-          postToFlutter('addBoard', { boardIds: boardIds, fileId: fileId || null });
-        });
-
-        board.on(TEduBoard.EVENT.TEB_DELETEBOARD, function (boardIds, fileId) {
-          postToFlutter('deleteBoard', { boardIds: boardIds, fileId: fileId || null });
-        });
-
-        board.on(TEduBoard.EVENT.TEB_GOTOBOARD, function (boardId, fileId) {
-          postToFlutter('gotoBoard', { boardId: boardId, fileId: fileId || null });
-        });
-      }
-
-      function initBoard(options) {
-        if (!window.TEduBoard) {
-          throw new Error('TEduBoard SDK is not loaded');
-        }
-        if (!options || !options.classId || !options.sdkAppId || !options.userId || !options.userSig) {
-          throw new Error('Missing required init params: classId, sdkAppId, userId, userSig');
-        }
-
-        if (board && typeof board.destroy === 'function') {
-          board.destroy();
-        }
-
-        boardReady = false;
-
-        var initParams = Object.assign({}, options, {
-          id: options.id || BOARD_CONTAINER_ID,
-          classId: Number(options.classId),
-          sdkAppId: Number(options.sdkAppId)
-        });
-
-        board = new TEduBoard(initParams);
-        window.__DEBUG_BOARD__ = board;
-        bindBoardEvents();
-
-        updateDebugPanel('Initializing TEduBoard', sanitizeOptionsForLog(initParams));
-        return { success: true };
-      }
-
-      function destroyBoard() {
-        if (board && typeof board.destroy === 'function') {
-          board.destroy();
-        }
-        board = null;
-        window.__DEBUG_BOARD__ = null;
-        boardReady = false;
-        setControlsDisabled(true);
-        updateDebugPanel('TEduBoard Destroyed', { success: true });
-        postToFlutter('boardDestroyed');
-        return { success: true };
-      }
-
-      function addSyncData(data) {
-        ensureBoardReady();
-        board.addSyncData(data);
-        return { success: true };
-      }
-
-      function resizeBoard() {
-        ensureBoardReady();
-        if (typeof board.resize === 'function') board.resize();
-        return { success: true };
       }
 
       function invokeBoardMethod(method, args) {
@@ -682,70 +458,113 @@
         return result === undefined ? { success: true } : result;
       }
 
-      // ======================== 控件交互 ========================
-      function handleControlAction(action, element) {
-        if (!action) return;
+      function applyDrawMode(mode) {
+        ensureBoardReady();
+        var nextMode = mode === 'browse' ? 'browse' : 'pen';
+        currentDrawMode = nextMode;
 
-        try {
-          var result;
-
-          if (action === 'addBoard') {
-            result = bridgeApi.invoke('addBoard', [null]);
-          } else if (action === 'addDebugTranscodeFile') {
-            result = addDebugTranscodeFile();
-          } else if (action === 'toggleDrawMode') {
-            result = toggleDrawMode();
-          } else if (action === 'setToolType') {
-            var toolKey = element.getAttribute('data-tool');
-            var toolType = TEduBoard.TOOL_TYPE[toolKey];
-            if (!Object.prototype.hasOwnProperty.call(TEduBoard.TOOL_TYPE, toolKey)) {
-              throw new Error('Unknown tool type: ' + toolKey);
-            }
-            result = bridgeApi.invoke('setToolType', [toolType]);
-            currentDrawMode = toolKey === 'TEDU_BOARD_TOOL_TYPE_MOUSE' ? 'browse' : 'pen';
-            updateDrawModeButton();
-          } else if (action === 'setBrushColor') {
-            result = bridgeApi.invoke('setBrushColor', [element.getAttribute('data-color')]);
-          } else if (action === 'setBrushThin') {
-            result = bridgeApi.invoke('setBrushThin', [Number(element.getAttribute('data-size'))]);
-            if (typeof board.getBrushThin === 'function') {
-              var appliedBrushThin = board.getBrushThin();
-              updateBrushThinButtons(appliedBrushThin);
-              result = {
-                requestedBrushThin: Number(element.getAttribute('data-size')),
-                appliedBrushThin: appliedBrushThin
-              };
-            }
-          } else {
-            result = bridgeApi.invoke(action, []);
-          }
-
-          updateControlStatus('执行成功: ' + action, result);
-        } catch (error) {
-          updateControlStatus('执行失败: ' + action, normalizeError(error));
+        if (typeof board.setDrawEnable === 'function') board.setDrawEnable(true);
+        if (typeof board.setDisableDrawActionEvent === 'function') {
+          board.setDisableDrawActionEvent(nextMode === 'browse');
         }
+        if (typeof board.setToolType === 'function' && TEduBoard && TEduBoard.TOOL_TYPE) {
+          board.setToolType(nextMode === 'browse'
+            ? TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_MOUSE
+            : TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_PEN);
+        }
+        return { mode: nextMode };
       }
 
-      function bindControls() {
-        var panel = document.getElementById(CONTROL_PANEL_ID);
-        if (!panel) return;
-        setControlsDisabled(true);
-        panel.addEventListener('click', function (event) {
-          var target = event.target;
-          if (!target || target.tagName !== 'BUTTON') return;
-          handleControlAction(target.getAttribute('data-action'), target);
+      function handleBoardInitEvent() {
+        boardReady = true;
+        updateDebugPanel('boardReady', sanitizeOptionsForLog(currentInitOptions));
+
+        var payload = {
+          classId: currentInitOptions && currentInitOptions.classId,
+          userId: currentInitOptions && currentInitOptions.userId,
+          currentBoardId: tryBoardGet(['getCurrentBoard']),
+          currentFileId: tryBoardGet(['getCurrentFile'])
+        };
+        postToFlutter('boardReady', payload);
+        applyDrawMode(currentDrawMode);
+      }
+
+      function bindBoardEvents() {
+        if (!board || !TEduBoard || !TEduBoard.EVENT) return;
+
+        Object.keys(TEduBoard.EVENT).forEach(function (eventKey) {
+          if (!eventKey || eventKey.indexOf('TEB_') !== 0) return;
+          var sdkEvent = TEduBoard.EVENT[eventKey];
+          if (!sdkEvent) return;
+
+          board.on(sdkEvent, function () {
+            var args = Array.prototype.slice.call(arguments);
+
+            if (eventKey === 'TEB_INIT') {
+              handleBoardInitEvent();
+              return;
+            }
+            if (eventKey === 'TEB_ERROR') {
+              updateDebugPanel('boardError', { code: args[0], message: args[1] });
+            } else if (eventKey === 'TEB_WARNING') {
+              updateDebugPanel('boardWarning', { code: args[0], message: args[1] });
+            }
+
+            postToFlutter(resolveFlutterEventType(eventKey), mapEventPayload(eventKey, args));
+          });
         });
       }
 
-      // ======================== Flutter 桥接 API ========================
+      function initBoard(options) {
+        if (!window.TEduBoard) throw new Error('TEduBoard SDK is not loaded');
+        if (!options || !options.classId || !options.sdkAppId || !options.userId || !options.userSig) {
+          throw new Error('Missing required init params: classId, sdkAppId, userId, userSig');
+        }
+
+        if (board && typeof board.destroy === 'function') board.destroy();
+
+        boardReady = false;
+        var initParams = Object.assign({}, options, {
+          id: options.id || BOARD_CONTAINER_ID,
+          classId: Number(options.classId),
+          sdkAppId: Number(options.sdkAppId)
+        });
+
+        board = new TEduBoard(initParams);
+        bindBoardEvents();
+        updateDebugPanel('initBoard', sanitizeOptionsForLog(initParams));
+        return { success: true };
+      }
+
+      function destroyBoard() {
+        if (board && typeof board.destroy === 'function') board.destroy();
+        board = null;
+        boardReady = false;
+        postToFlutter('boardDestroyed', null);
+        updateDebugPanel('boardDestroyed', {});
+        return { success: true };
+      }
+
+      function attachBoardInvokeMethods(api, methodNames) {
+        methodNames.forEach(function (name) {
+          api[name] = function () {
+            var args = Array.prototype.slice.call(arguments);
+            return safely(name, function () { return invokeBoardMethod(name, args); });
+          };
+        });
+      }
+
+      // =========================================================================
+      // 7. window.WhiteboardWebBridge（Flutter 入口）
+      // =========================================================================
       var bridgeApi = {
-        // 用「这节课」的参数初始化白板 + TIM（不同课次互不污染）。
+        version: '1.1.0',
+
         init: function (options) {
           return safely('init', function () {
             if (!options || !options.classId || !options.sdkAppId || !options.userId || !options.userSig) {
               throw new Error('Missing required init params: classId, sdkAppId, userId, userSig');
             }
-            // 同一节课重复 init 不必反复重建。
             if (currentInitOptions &&
               String(currentInitOptions.classId) === String(options.classId) &&
               String(currentInitOptions.sdkAppId) === String(options.sdkAppId) &&
@@ -753,7 +572,6 @@
               boardReady) {
               return { success: true, reused: true, options: sanitizeOptionsForLog(currentInitOptions) };
             }
-            // 换课/重进：先把旧的资源销毁干净。
             destroyBoard();
             resetSyncChannel(options.classId);
             initBoard(options);
@@ -762,6 +580,7 @@
             return { success: true, options: sanitizeOptionsForLog(options) };
           });
         },
+
         destroy: function () {
           return safely('destroy', function () {
             destroyBoard();
@@ -775,98 +594,166 @@
             return { success: true };
           });
         },
+
         addSyncData: function (data) {
-          return safely('addSyncData', function () { return addSyncData(data); });
+          return safely('addSyncData', function () {
+            ensureBoardReady();
+            board.addSyncData(data);
+            return { success: true };
+          });
         },
+
         resize: function () {
-          return safely('resize', resizeBoard);
+          return safely('resize', function () {
+            ensureBoardReady();
+            if (typeof board.resize === 'function') board.resize();
+            return { success: true };
+          });
         },
+
         invoke: function (method, args) {
           return safely(method || 'invoke', function () { return invokeBoardMethod(method, args); });
         },
-        // ===== flutter层调用能力 =====
-        setDrawMode: function (mode) {
-          return safely('setDrawMode', function () {
-            return applyDrawMode(mode);
-          });
+
+        call: function (method, args) {
+          return bridgeApi.invoke(method, args);
         },
+
+        setDrawMode: function (mode) {
+          return safely('setDrawMode', function () { return applyDrawMode(mode); });
+        },
+
         setTool: function (name) {
           return safely('setTool', function () {
             ensureBoardReady();
-            if (!TEduBoard || !TEduBoard.TOOL_TYPE) {
-              throw new Error('TEduBoard.TOOL_TYPE unavailable');
-            }
-            var map = {
-              pen: TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_PEN,
-              eraser: TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_ERASER,
-              mouse: TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_MOUSE
-            };
-            var toolType = map[name];
-            if (toolType === undefined) {
-              throw new Error('Unknown tool: ' + name);
-            }
-            board.setToolType(toolType);
+            if (!TEduBoard || !TEduBoard.TOOL_TYPE) throw new Error('TEduBoard.TOOL_TYPE unavailable');
+            var toolKey = TOOL_NAME_MAP[name];
+            if (!toolKey || !TEduBoard.TOOL_TYPE[toolKey]) throw new Error('Unknown tool: ' + name);
+            board.setToolType(TEduBoard.TOOL_TYPE[toolKey]);
             currentDrawMode = name === 'mouse' ? 'browse' : 'pen';
             return { tool: name, drawMode: currentDrawMode };
           });
         },
+
+        gotoBoard: function (boardId, resetStep) {
+          return safely('gotoBoard', function () {
+            if (resetStep !== undefined && resetStep !== null) {
+              return invokeBoardMethod('gotoBoard', [boardId, resetStep]);
+            }
+            return invokeBoardMethod('gotoBoard', [boardId]);
+          });
+        },
+
+        switchFile: function (fileId, boardId, stepIndex) {
+          return safely('switchFile', function () {
+            if (boardId !== undefined && boardId !== null && boardId !== '') {
+              return invokeBoardMethod('switchFile', [fileId, boardId, stepIndex || 0]);
+            }
+            return invokeBoardMethod('switchFile', [fileId]);
+          });
+        },
+
+        addBoardWithBackgroundImage: function (url) {
+          return safely('addBoardWithBackgroundImage', function () {
+            if (typeof board.addBoard !== 'function') throw new Error('addBoard unavailable');
+            var fitMode = TEduBoard.IMAGE_FIT_MODE
+              ? TEduBoard.IMAGE_FIT_MODE.TEDU_BOARD_IMAGE_FIT_MODE_CENTER
+              : undefined;
+            var bgImageType = 1;
+            if (TEduBoard.BACKGROUND_IMAGE && TEduBoard.BACKGROUND_IMAGE.TEDU_BOARD_BACKGROUND_IMAGE !== undefined) {
+              bgImageType = TEduBoard.BACKGROUND_IMAGE.TEDU_BOARD_BACKGROUND_IMAGE;
+            } else if (TEduBoard.BACKGROUND_IMAGE_TYPE &&
+              TEduBoard.BACKGROUND_IMAGE_TYPE.TEDU_BOARD_BACKGROUND_IMAGE !== undefined) {
+              bgImageType = TEduBoard.BACKGROUND_IMAGE_TYPE.TEDU_BOARD_BACKGROUND_IMAGE;
+            }
+            return { boardId: board.addBoard(url || null, fitMode, bgImageType, true) };
+          });
+        },
+
+        setBackgroundImage: function (url, mode) {
+          return safely('setBackgroundImage', function () {
+            if (mode !== undefined && mode !== null) {
+              return invokeBoardMethod('setBackgroundImage', [url, mode]);
+            }
+            return invokeBoardMethod('setBackgroundImage', [url]);
+          });
+        },
+
+        getConstants: function () {
+          return pickSdkConstants([
+            'TOOL_TYPE', 'FILE_TYPE', 'ELEMENT_TYPE', 'IMAGE_FIT_MODE',
+            'TEXT_STYLE', 'LINE_STYLE', 'ELLIPSE_DRAW_MODE', 'EVENT',
+            'ERROR_CODE', 'WARNING_CODE', 'UPLOAD_STATUS', 'VIDEO_STATUS',
+            'H5_FILE_STATUS', 'H5_PPT_STATUS', 'AUDIO_STATUS', 'IMAGE_STATUS'
+          ]);
+        },
+
+        listEvents: function () {
+          return Object.assign({}, EVENT_FLUTTER_TYPE_MAP);
+        },
+
+        getBoardInfo: function () {
+          return safely('getBoardInfo', function () {
+            ensureBoardReady();
+            return {
+              boardReady: boardReady,
+              drawMode: currentDrawMode,
+              currentBoardId: tryBoardGet(['getCurrentBoard']),
+              currentFileId: tryBoardGet(['getCurrentFile']),
+              boardList: tryBoardGet(['getBoardList']),
+              toolType: tryBoardGet(['getToolType']),
+              brushColor: tryBoardGet(['getBrushColor']),
+              brushThin: tryBoardGet(['getBrushThin']),
+              boardScale: tryBoardGet(['getBoardScale']),
+              drawEnable: tryBoardGet(['isDrawEnable', 'getDrawEnable'])
+            };
+          });
+        },
+
         setBridgeConfig: function (config) {
           bridgeConfig = Object.assign({}, bridgeConfig, config || {});
-          exposeBridge();
+          window[bridgeConfig.jsBridge] = bridgeApi;
           return { success: true, bridgeConfig: bridgeConfig };
         },
+
         getState: function () {
           return {
             hasBoard: !!board,
             boardReady: boardReady,
             bridgeConfig: bridgeConfig,
             options: sanitizeOptionsForLog(currentInitOptions),
-            tim: { ready: timReady, account: timAccount, groupId: TIM_GROUP_ID, syncChannel: syncChannelName }
+            drawMode: currentDrawMode,
+            tim: {
+              ready: timReady,
+              account: timAccount,
+              groupId: TIM_GROUP_ID,
+              syncChannel: syncChannelName
+            }
           };
         }
       };
 
-      function safely(action, fn) {
-        try {
-          var result = fn();
-          postToFlutter('methodResult', { action: action, result: result === undefined ? null : result });
-          return result;
-        } catch (error) {
-          var normalizedError = normalizeError(error);
-          postToFlutter('methodError', { action: action, error: normalizedError });
-          throw error;
+      attachBoardInvokeMethods(bridgeApi, BOARD_INVOKE_METHODS);
+
+      // =========================================================================
+      // 8. 启动
+      // =========================================================================
+      function bootstrap() {
+        if (bridgeConfig.debug) {
+          var debugPanel = document.getElementById(DEBUG_PANEL_ID);
+          if (debugPanel) debugPanel.classList.add('is-visible');
         }
-      }
 
-      function exposeBridge() {
         window[bridgeConfig.jsBridge] = bridgeApi;
+        postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig });
+        updateDebugPanel('Web Bridge Ready', { version: bridgeApi.version });
+
+        window.addEventListener('resize', function () {
+          if (board && typeof board.resize === 'function') board.resize();
+        });
       }
 
-      bindControls();
-      exposeBridge();
-      postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig });
-      updateDebugPanel('Web Bridge Ready', { bridgeConfig: bridgeConfig, autoInit: false });
-
-      // ⚠️ 生产路径：不要在这里调用 initBoard / initTIM。
-      // Flutter 会在收到 webBridgeReady 之后，调用 bridgeApi.init(options) 注入当节课参数。
-      // ⚠️ DEBUG_INIT_OPTIONS 自启动已注释，本节课参数必须由 Flutter 注入，便于排查注入是否成功。
-      // if (bridgeConfig.debug) {
-      //   try {
-      //     var debugOptions = resolveDebugInitOptions();
-      //     updateDebugPanel('Debug auto-init', sanitizeOptionsForLog(debugOptions));
-      //     bridgeApi.init(debugOptions);
-      //   } catch (error) {
-      //     updateDebugPanel('Debug auto-init failed', normalizeError(error));
-      //   }
-      // }
-      if (bridgeConfig.debug) {
-        updateDebugPanel('Debug auto-init disabled', { hint: '取消 DEBUG_INIT_OPTIONS 注释以恢复' });
-      }
-
-      // 容器尺寸变化时主动通知白板重新布局，避免显示区域错乱。
-      window.addEventListener('resize', function () {
-        if (board && typeof board.resize === 'function') board.resize();
-      });
+      bootstrap();
     })();
   </script>
 </body>
