@@ -79,7 +79,7 @@
         mouse: 'TEDU_BOARD_TOOL_TYPE_MOUSE'
       };
 
-      /** 透传到 board.xxx 的方法名（与 Web SDK / iOS LSEduBoardManager 对齐） */
+      /** 透传到 board.xxx 的方法名（Web SDK 方法名） */
       var BOARD_INVOKE_METHODS = [
         'syncAndReload', 'reset', 'setDataSyncEnable', 'getDataSyncEnable',
         'setDrawEnable', 'isDrawEnable', 'setAccessibleUsers',
@@ -324,7 +324,7 @@
       }
 
       // =========================================================================
-      // 5. TIM 信令（classId = 群 ID）
+      // 5. TIM 信令
       // =========================================================================
       function resetSyncChannel(classId) {
         if (syncChannel) {
@@ -442,7 +442,7 @@
       }
 
       // =========================================================================
-      // 6. TEduBoard 核心
+      // 6. TEduBoard 
       // =========================================================================
       function ensureBoardReady() {
         if (!board) throw new Error('TEduBoard has not been initialized');
