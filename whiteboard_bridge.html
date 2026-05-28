@@ -51,9 +51,6 @@
   <script src="https://res.qcloudtiw.com/board/third/axios/axios.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/third/cos/5.1.0/cos.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/2.9.13/TEduBoard.min.js"></script>
-  <script src="https://unpkg.com/tim-js-sdk@2.27.6/tim-js.js"></script>
-  <script src="https://unpkg.com/tim-upload-plugin@1.4.3/index.js"></script>
-  <script src="https://unpkg.com/tim-profanity-filter-plugin@1.1.0/index.js"></script>
 </head>
 
 <body>
@@ -71,8 +68,6 @@
       var DEFAULT_JS_BRIDGE = 'WhiteboardWebBridge';
       var BOARD_CONTAINER_ID = 'board-container';
       var DEBUG_PANEL_ID = 'debug-panel';
-      var TIM_BOARD_EXT = 'TXWhiteBoardExt';
-
       var TOOL_NAME_MAP = {
         pen: 'TEDU_BOARD_TOOL_TYPE_PEN',
         eraser: 'TEDU_BOARD_TOOL_TYPE_ERASER',
@@ -207,10 +202,6 @@
       var boardReady = false;
       var currentDrawMode = 'pen';
       var currentInitOptions = null;
-      var tim = null;
-      var timReady = false;
-      var timAccount = null;
-      var TIM_GROUP_ID = '';
       var syncChannel = null;
       var syncChannelName = '';
 
@@ -295,11 +286,12 @@
       // 4. Flutter 通信
       // =========================================================================
       function postToFlutter(type, payload) {
-        if (type === 'syncData') {
-          sendSyncDataViaTIM(payload);
-          if (syncChannel) {
-            syncChannel.postMessage({ type: 'syncData', payload: payload });
-          }
+        // syncData：上报 Flutter，由 ImManager(V2TIM) 发到白板群（勿在 H5 再登 tim-js-sdk）
+        if (type === 'syncData' && bridgeConfig.debug) {
+          updateDebugPanel('TEB_SYNCDATA', { payloadType: typeof payload });
+        }
+        if (type === 'syncData' && syncChannel) {
+          syncChannel.postMessage({ type: 'syncData', payload: payload });
         }
 
         var channel = window[bridgeConfig.flutterChannel];
@@ -324,7 +316,7 @@
       }
 
       // =========================================================================
-      // 5. TIM 信令
+      // 5. BroadcastChannel（多标签同步，单 WebView 场景不使用）
       // =========================================================================
       function resetSyncChannel(classId) {
         if (syncChannel) {
@@ -338,107 +330,6 @@
           if (!board || !event.data || event.data.type !== 'syncData') return;
           try { board.addSyncData(event.data.payload); } catch (e) { }
         };
-      }
-
-      function teardownTim() {
-        if (!tim) return Promise.resolve();
-        var t = tim;
-        tim = null;
-        timReady = false;
-        timAccount = null;
-        try {
-          if (TIM_GROUP_ID) t.quitGroup(TIM_GROUP_ID).catch(function () { });
-        } catch (e) { }
-        TIM_GROUP_ID = '';
-        try {
-          return t.logout().catch(function () { });
-        } catch (e) {
-          return Promise.resolve();
-        }
-      }
-
-      function initTIM(options) {
-        if (typeof TIM === 'undefined') {
-          updateDebugPanel('TIM SDK 未加载', {});
-          return;
-        }
-        if (!options || !options.sdkAppId || !options.userId || !options.userSig ||
-          options.classId === undefined || options.classId === null) {
-          updateDebugPanel('initTIM 参数缺失', sanitizeOptionsForLog(options));
-          return;
-        }
-
-        var nextGroupId = String(options.classId);
-
-        teardownTim().then(function () {
-          tim = TIM.create({ SDKAppID: Number(options.sdkAppId) });
-
-          if (typeof TIMUploadPlugin !== 'undefined') {
-            tim.registerPlugin({ 'tim-upload-plugin': TIMUploadPlugin });
-          }
-          if (typeof TIMProfanityFilterPlugin !== 'undefined') {
-            tim.registerPlugin({ 'tim-profanity-filter-plugin': TIMProfanityFilterPlugin });
-          }
-          tim.setLogLevel(1);
-
-          tim.on(TIM.EVENT.SDK_READY, function () {
-            timReady = true;
-            updateDebugPanel('TIM ready', { groupId: nextGroupId, userId: options.userId });
-            tim.joinGroup({ groupID: nextGroupId }).catch(function () { });
-          });
-
-          tim.on(TIM.EVENT.SDK_NOT_READY, function () {
-            timReady = false;
-          });
-
-          tim.on(TIM.EVENT.MESSAGE_RECEIVED, function (event) {
-            if (!board) return;
-            event.data.forEach(function (message) {
-              if (message.conversationType !== TIM.TYPES.CONV_GROUP) return;
-              if (message.to !== nextGroupId || message.from === options.userId) return;
-
-              var applyPayload = function (raw) {
-                try { board.addSyncData(JSON.parse(raw)); } catch (e) { }
-              };
-
-              if (message.type === TIM.TYPES.MSG_CUSTOM &&
-                message.payload && message.payload.extension === TIM_BOARD_EXT) {
-                applyPayload(message.payload.data);
-                return;
-              }
-              if (typeof message.getElements === 'function') {
-                message.getElements().forEach(function (element) {
-                  if (element.type === 'TIMCustomElem' &&
-                    element.content && element.content.extension === TIM_BOARD_EXT) {
-                    applyPayload(element.content.data);
-                  }
-                });
-              }
-            });
-          });
-
-          tim.login({ userID: options.userId, userSig: options.userSig })
-            .then(function () {
-              TIM_GROUP_ID = nextGroupId;
-              timAccount = { sdkAppId: Number(options.sdkAppId), userId: options.userId };
-            })
-            .catch(function (err) {
-              updateDebugPanel('TIM 登录失败', { error: err && err.message });
-            });
-        });
-      }
-
-      function sendSyncDataViaTIM(data) {
-        if (!tim || !timReady || !TIM_GROUP_ID) return;
-        var message = tim.createCustomMessage({
-          to: TIM_GROUP_ID,
-          conversationType: TIM.TYPES.CONV_GROUP,
-          priority: TIM.TYPES.MSG_PRIORITY_HIGH,
-          payload: { data: JSON.stringify(data), description: '', extension: TIM_BOARD_EXT }
-        });
-        tim.sendMessage(message).catch(function (err) {
-          updateDebugPanel('TIM 发送失败', { error: err && err.message });
-        });
       }
 
       // =========================================================================
@@ -524,10 +415,17 @@
         if (board && typeof board.destroy === 'function') board.destroy();
 
         boardReady = false;
+        // 由 Flutter V2TIM 转发时需 dataSyncEnable=true 以产生 syncData 事件。
         var initParams = Object.assign({}, options, {
           id: options.id || BOARD_CONTAINER_ID,
           classId: Number(options.classId),
-          sdkAppId: Number(options.sdkAppId)
+          sdkAppId: Number(options.sdkAppId),
+          authConfig: Object.assign({}, options.authConfig || {}, {
+            dataSyncEnable: true,
+            drawEnable: options.authConfig && options.authConfig.drawEnable !== undefined
+              ? options.authConfig.drawEnable
+              : true
+          })
         });
 
         board = new TEduBoard(initParams);
@@ -575,7 +473,6 @@
             destroyBoard();
             resetSyncChannel(options.classId);
             initBoard(options);
-            initTIM(options);
             currentInitOptions = options;
             return { success: true, options: sanitizeOptionsForLog(options) };
           });
@@ -584,7 +481,6 @@
         destroy: function () {
           return safely('destroy', function () {
             destroyBoard();
-            teardownTim();
             if (syncChannel) {
               try { syncChannel.close(); } catch (e) { }
               syncChannel = null;
@@ -723,12 +619,7 @@
             bridgeConfig: bridgeConfig,
             options: sanitizeOptionsForLog(currentInitOptions),
             drawMode: currentDrawMode,
-            tim: {
-              ready: timReady,
-              account: timAccount,
-              groupId: TIM_GROUP_ID,
-              syncChannel: syncChannelName
-            }
+            syncChannel: syncChannelName
           };
         }
       };
