@@ -95,6 +95,7 @@
         'setSyncVideoStatusEnable', 'startSyncVideoStatus', 'stopSyncVideoStatus',
         'playAudio', 'pauseAudio', 'seekAudio', 'setAudioVolume', 'getAudioVolume',
         'muteAudio', 'setSyncAudioStatusEnable',
+        'setShowPPTAudioControls',
         'removeElement', 'getElementList', 'getElementById', 'setElementById',
         'snapshot', 'exportBoardData'
       ];
@@ -366,6 +367,13 @@
         return { mode: nextMode };
       }
 
+      function applyShowPPTAudioControls(show) {
+        ensureBoardReady();
+        if (typeof board.setShowPPTAudioControls !== 'function') return { success: false };
+        board.setShowPPTAudioControls(!!show);
+        return { success: true, show: !!show };
+      }
+
       function handleBoardInitEvent() {
         boardReady = true;
         updateDebugPanel('boardReady', sanitizeOptionsForLog(currentInitOptions));
@@ -378,6 +386,8 @@
         };
         postToFlutter('boardReady', payload);
         applyDrawMode(currentDrawMode);
+        var showPPTAudioControls = currentInitOptions && currentInitOptions.showPPTAudioControls;
+        applyShowPPTAudioControls(showPPTAudioControls !== false);
       }
 
       function bindBoardEvents() {
