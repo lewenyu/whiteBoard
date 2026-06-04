@@ -48,8 +48,10 @@
       color: #f8fafc;
     }
   </style>
+  <link href="https://res.qcloudtiw.com/board/third/videojs/1.0.0/video-js.min.css" rel="stylesheet">
   <script src="https://res.qcloudtiw.com/board/third/axios/axios.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/third/cos/5.1.0/cos.min.js"></script>
+  <script src="https://res.qcloudtiw.com/board/third/videojs/1.0.0/video.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/2.9.13/TEduBoard.min.js"></script>
 </head>
 
@@ -441,6 +443,11 @@
           })
         });
 
+        if (options.ratio) {
+          initParams.ratio = options.ratio;
+        }
+
+        currentInitOptions = options;
         board = new TEduBoard(initParams);
         bindBoardEvents();
         updateDebugPanel('initBoard', sanitizeOptionsForLog(initParams));
@@ -507,7 +514,15 @@
         addSyncData: function (data) {
           return safely('addSyncData', function () {
             ensureBoardReady();
-            board.addSyncData(data);
+            var syncPayload = data;
+            if (typeof syncPayload === 'string') {
+              try {
+                syncPayload = JSON.parse(syncPayload);
+              } catch (e) {
+                console.warn('[TEduBoardBridge] addSyncData JSON.parse failed', e);
+              }
+            }
+            board.addSyncData(syncPayload);
             return { success: true };
           });
         },
