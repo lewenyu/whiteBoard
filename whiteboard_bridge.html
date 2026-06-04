@@ -296,7 +296,10 @@
         }
 
         var channel = window[bridgeConfig.flutterChannel];
-        if (!channel || typeof channel.postMessage !== 'function') return;
+        if (!channel || typeof channel.postMessage !== 'function') {
+          console.warn('[TEduBoardBridge] postToFlutter skipped, channel unavailable: ' + type);
+          return;
+        }
 
         channel.postMessage(JSON.stringify({
           type: type,
@@ -631,6 +634,11 @@
             drawMode: currentDrawMode,
             syncChannel: syncChannelName
           };
+        },
+
+        resendWebBridgeReady: function () {
+          postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig, resent: true });
+          return { success: true };
         }
       };
 
@@ -639,6 +647,33 @@
       // =========================================================================
       // 8. 启动
       // =========================================================================
+      function isFlutterChannelReady() {
+        var channel = window[bridgeConfig.flutterChannel];
+        return !!(channel && typeof channel.postMessage === 'function');
+      }
+
+      // App WebView 中 UserScript / callHandler 可能晚于 bootstrap，需等待 Channel 注入
+      function waitForFlutterChannel(onReady, onTimeout) {
+        if (isFlutterChannelReady()) {
+          onReady();
+          return;
+        }
+        var attempts = 0;
+        var timer = setInterval(function () {
+          attempts++;
+          if (isFlutterChannelReady()) {
+            clearInterval(timer);
+            onReady();
+            return;
+          }
+          if (attempts >= 200) {
+            clearInterval(timer);
+            console.warn('[TEduBoardBridge] Flutter channel wait timeout: ' + bridgeConfig.flutterChannel);
+            if (onTimeout) onTimeout();
+          }
+        }, 16);
+      }
+
       function bootstrap() {
         if (bridgeConfig.debug) {
           var debugPanel = document.getElementById(DEBUG_PANEL_ID);
@@ -646,8 +681,10 @@
         }
 
         window[bridgeConfig.jsBridge] = bridgeApi;
-        postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig });
-        updateDebugPanel('Web Bridge Ready', { version: bridgeApi.version });
+        waitForFlutterChannel(function () {
+          postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig });
+          updateDebugPanel('Web Bridge Ready', { version: bridgeApi.version });
+        });
 
         window.addEventListener('resize', function () {
           if (board && typeof board.resize === 'function') board.resize();
