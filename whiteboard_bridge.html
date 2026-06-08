@@ -78,31 +78,31 @@
 
       /** 透传到 board.xxx 的方法名（Web SDK 方法名） */
       var BOARD_INVOKE_METHODS = [
-        'syncAndReload', 'reset', 'setDataSyncEnable', 'getDataSyncEnable',
+        'syncAndReload', 'reset', 'setDataSyncEnable', 'isDataSyncEnable',
         'setDrawEnable', 'isDrawEnable', 'setAccessibleUsers',
         'setBrushColor', 'setBrushThin', 'setTextColor', 'setTextStyle', 'setTextSize',
         'setHandwritingEnable', 'setBoardScale', 'getBoardScale',
-        'undo', 'redo', 'clear', 'clearDraws', 'setToolType',
+        'undo', 'redo', 'clear', 'clearFileDraws', 'setToolType',
         'getToolType', 'getBrushColor', 'getBrushThin',
         'setEraserSize', 'getEraserSize', 'setHighlighterColor', 'getHighlighterColor',
-        'addBoard', 'deleteBoard', 'preBoard', 'nextBoard', 'prevStep', 'nextStep',
+        'addBoard', 'deleteBoard', 'prevBoard', 'nextBoard', 'prevStep', 'nextStep',
         'getBoardList', 'getCurrentBoard', 'refresh',
         'setBoardContentFitMode', 'getBoardContentFitMode',
         'setBoardRatio', 'getBoardRatio', 'setBoardRemark', 'getBoardRemark',
         'setBackgroundH5', 'setBackgroundColor', 'setGlobalBackgroundColor',
         'getBackgroundColor', 'getGlobalBackgroundColor', 'setGlobalBackgroundPic', 'getGlobalBackgroundPic',
         'addTranscodeFile', 'deleteFile', 'addH5File', 'addVideoFile', 'addImagesFile', 'addElement',
-        'getFileInfoList', 'getFileBoardList', 'getCurrentFile', 'getThumbnail',
+        'getFileInfoList', 'getFileBoardList', 'getCurrentFile', 'getThumbnailImages',
         'showVideoControl', 'playVideo', 'pauseVideo', 'seekVideo',
         'setSyncVideoStatusEnable', 'startSyncVideoStatus', 'stopSyncVideoStatus',
         'playAudio', 'pauseAudio', 'seekAudio', 'setAudioVolume', 'getAudioVolume',
         'muteAudio', 'setSyncAudioStatusEnable',
         'setShowPPTAudioControls',
-        'removeElement', 'getElementList', 'getElementById', 'setElementById',
-        'snapshot', 'exportBoardData'
+        'removeElement', 'getBoardElementList', 'getElementById', 'updateElementById',
+        'snapshot', 'exportInLocalMode'
       ];
 
-      /** TEduBoard.EVENT -> Flutter postMessage.type */
+      /** TEduBoard.EVENT key -> Flutter postMessage.type（对齐 SDK 2.9.13 + Dart WhiteboardEventType） */
       var EVENT_FLUTTER_TYPE_MAP = {
         TEB_INIT: 'boardReady',
         TEB_ERROR: 'boardError',
@@ -110,48 +110,80 @@
         TEB_SYNCDATA: 'syncData',
         TEB_HISTROYDATA_SYNCCOMPLETED: 'historyDataSyncCompleted',
         TEB_OFFLINE: 'boardOffline',
+        TEB_OFFLINE_WARNING: 'boardOffline',
+        TEB_OPERATE_CANUNDO_STATUS_CHANGED: 'undoStatusChanged',
+        TEB_OPERATE_CANREDO_STATUS_CHANGED: 'redoStatusChanged',
+        TEB_UNDOSTATUSCHANGED: 'undoStatusChanged',
+        TEB_REDOSTATUSCHANGED: 'redoStatusChanged',
         TEB_ADDBOARD: 'addBoard',
         TEB_DELETEBOARD: 'deleteBoard',
         TEB_GOTOBOARD: 'gotoBoard',
         TEB_GOTOSTEP: 'gotoStep',
         TEB_REFRESH: 'boardRefresh',
-        TEB_UNDOSTATUSCHANGED: 'undoStatusChanged',
-        TEB_REDOSTATUSCHANGED: 'redoStatusChanged',
-        TEB_IMAGESTATUSCHANGED: 'imageStatusChanged',
-        TEB_SETBACKGROUNDIMAGE: 'setBackgroundImage',
-        TEB_BACKGROUNDH5STATUSCHANGED: 'backgroundH5StatusChanged',
-        TEB_ADDELEMENT: 'addElement',
-        TEB_FILETRANSCODEPROGRESS: 'fileTranscodeProgress',
+        TEB_ADDFILE: 'addFile',
+        TEB_ADDH5PPTFILE: 'addH5PptFile',
         TEB_ADDTRANSCODEFILE: 'addTranscodeFile',
         TEB_DELETEFILE: 'deleteFile',
         TEB_SWITCHFILE: 'switchFile',
+        TEB_ADDIMAGESFILE: 'addImagesFile',
+        TEB_TRANSCODEPROGRESS: 'fileTranscodeProgress',
+        TEB_FILETRANSCODEPROGRESS: 'fileTranscodeProgress',
+        TEB_IMAGE_STATUS_CHANGED: 'imageStatusChanged',
+        TEB_IMAGESTATUSCHANGED: 'imageStatusChanged',
+        TEB_SETBACKGROUNDIMAGE: 'setBackgroundImage',
+        TEB_H5BACKGROUND_STATUS_CHANGED: 'backgroundH5StatusChanged',
+        TEB_BACKGROUNDH5STATUSCHANGED: 'backgroundH5StatusChanged',
+        TEB_H5FILE_STATUS_CHANGED: 'h5FileStatusChanged',
+        TEB_H5FILESTATUSCHANGED: 'h5FileStatusChanged',
+        TEB_VIDEO_STATUS_CHANGED: 'videoStatusChanged',
+        TEB_VIDEOSTATUSCHANGED: 'videoStatusChanged',
+        TEB_AUDIO_STATUS_CHANGED: 'audioStatusChanged',
+        TEB_AUDIOSTATUSCHANGED: 'audioStatusChanged',
+        TEB_H5PPT_STATUS_CHANGED: 'h5PptStatusChanged',
+        TEB_H5PPTSTATUSCHANGED: 'h5PptStatusChanged',
+        TEB_H5PPT_MEDIA_STATUS_CHANGED: 'h5PptMediaStatusChanged',
+        TEB_H5PPTMEDIASTATUSCHANGED: 'h5PptMediaStatusChanged',
+        TEB_IMAGE_ELEMENT_STATUS_CHANGED: 'imageElementStatusChanged',
         TEB_FILEUPLOADPROGRESS: 'fileUploadProgress',
         TEB_FILEUPLOADSTATUS: 'fileUploadStatus',
-        TEB_H5FILESTATUSCHANGED: 'h5FileStatusChanged',
-        TEB_VIDEOSTATUSCHANGED: 'videoStatusChanged',
-        TEB_H5PPTMEDIASTATUSCHANGED: 'h5PptMediaStatusChanged',
-        TEB_H5PPTSTATUSCHANGED: 'h5PptStatusChanged',
-        TEB_ADDIMAGESFILE: 'addImagesFile',
-        TEB_RECTSELECTED: 'rectSelected',
+        TEB_ADDELEMENT: 'addElement',
         TEB_ADDIMAGEELEMENT: 'addImageElement',
-        TEB_SNAPSHOT: 'snapshot',
-        TEB_AUDIOSTATUSCHANGED: 'audioStatusChanged',
-        TEB_ZOOMSTATUSCHANGED: 'zoomStatusChanged',
-        TEB_BOARDREMARKCHANGED: 'boardRemarkChanged',
-        TEB_BOARDSCROLLCHANGED: 'boardScrollChanged',
-        TEB_MOUSEMOVE: 'mouseMove',
-        TEB_ELEMENTPOSITIONCHANGED: 'elementPositionChanged',
+        TEB_REMOVEELEMENT: 'elementDeleted',
         TEB_ELEMENTDELETED: 'elementDeleted',
+        TEB_SELECTED_ELEMENTS: 'selectedElements',
+        TEB_RECTSELECTED: 'selectedElements',
+        TEB_BOARD_ELEMENT_POSITION_CHANGE: 'elementPositionChanged',
+        TEB_ELEMENTPOSITIONCHANGED: 'elementPositionChanged',
+        TEB_BOARD_SCALE_CHANGE: 'boardScaleChange',
+        TEB_SNAPSHOT: 'snapshot',
+        TEB_ZOOM_DRAG_STATUS: 'zoomDragStatus',
+        TEB_ZOOMSTATUSCHANGED: 'zoomDragStatus',
+        TEB_BOARD_REMARK_CHANGED: 'boardRemarkChanged',
+        TEB_BOARDREMARKCHANGED: 'boardRemarkChanged',
+        TEB_BOARD_SCROLL_CHANGED: 'boardScrollChanged',
+        TEB_BOARDSCROLLCHANGED: 'boardScrollChanged',
+        TEB_BOARD_CURSOR_POSITION: 'boardCursorPosition',
+        TEB_MOUSEMOVE: 'boardCursorPosition',
+        TEB_MATH_GRAPH_EVENT: 'mathGraphStatusChanged',
         TEB_MATHGRAPHSTATUSCHANGED: 'mathGraphStatusChanged',
+        TEB_TEXT_ELEMENT_STATUS_CHANGED: 'textComponentStatusChanged',
+        TEB_TEXT_COMPONENT_STATUS_CHANGE: 'textComponentStatusChanged',
         TEB_TEXTCOMPONENTSTATUSCHANGED: 'textComponentStatusChanged',
+        TEB_TEXT_ELEMENT_WARNING: 'textWarn',
         TEB_TEXTWARN: 'textWarn'
       };
 
       var EVENT_PAYLOAD_MAPPERS = {
         TEB_ERROR: function (code, msg) { return { code: code, message: msg }; },
         TEB_WARNING: function (code, msg) { return { code: code, message: msg }; },
-        TEB_UNDOSTATUSCHANGED: function (canUndo) { return { canUndo: !!canUndo }; },
-        TEB_REDOSTATUSCHANGED: function (canRedo) { return { canRedo: !!canRedo }; },
+        TEB_OFFLINE_WARNING: function (data) {
+          if (data && typeof data === 'object') return data;
+          return { data: data || null };
+        },
+        TEB_OPERATE_CANUNDO_STATUS_CHANGED: function (enable) { return { canUndo: !!enable }; },
+        TEB_OPERATE_CANREDO_STATUS_CHANGED: function (enable) { return { canRedo: !!enable }; },
+        TEB_UNDOSTATUSCHANGED: function (enable) { return { canUndo: !!enable }; },
+        TEB_REDOSTATUSCHANGED: function (enable) { return { canRedo: !!enable }; },
         TEB_ADDBOARD: function (boardIds, fileId) { return { boardIds: boardIds, fileId: fileId || null }; },
         TEB_DELETEBOARD: function (boardIds, fileId) { return { boardIds: boardIds, fileId: fileId || null }; },
         TEB_GOTOBOARD: function (boardId, fileId, userId) {
@@ -160,14 +192,33 @@
         TEB_GOTOSTEP: function (currentStep, totalStep) {
           return { currentStep: currentStep, totalStep: totalStep };
         },
+        TEB_IMAGE_STATUS_CHANGED: function (status, data) {
+          if (data && typeof data === 'object') {
+            return Object.assign({ status: status }, data);
+          }
+          return { status: status, data: data || null };
+        },
         TEB_IMAGESTATUSCHANGED: function (boardId, url, status) {
           return { boardId: boardId, url: url, status: status };
         },
-        TEB_SETBACKGROUNDIMAGE: function (url) { return { url: url }; },
+        TEB_SETBACKGROUNDIMAGE: function (url, name, userData) {
+          return { url: url, name: name || null, userData: userData || null };
+        },
+        TEB_H5BACKGROUND_STATUS_CHANGED: function (status, data) {
+          if (data && typeof data === 'object') {
+            return Object.assign({ status: status }, data);
+          }
+          return { status: status, data: data || null };
+        },
         TEB_BACKGROUNDH5STATUSCHANGED: function (boardId, url, status) {
           return { boardId: boardId, url: url, status: status };
         },
-        TEB_ADDELEMENT: function (elementId, url) { return { elementId: elementId, url: url }; },
+        TEB_ADDELEMENT: function (data) {
+          if (data && typeof data === 'object') return data;
+          return { elementId: data };
+        },
+        TEB_ADDFILE: function (fileId) { return { fileId: fileId }; },
+        TEB_ADDH5PPTFILE: function (fileId) { return { fileId: fileId }; },
         TEB_ADDTRANSCODEFILE: function (fileId) { return { fileId: fileId }; },
         TEB_DELETEFILE: function (fileId) { return { fileId: fileId }; },
         TEB_SWITCHFILE: function (fileId) { return { fileId: fileId }; },
@@ -177,20 +228,48 @@
         TEB_FILEUPLOADSTATUS: function (fileId, status, errorCode, errorMsg) {
           return { fileId: fileId, status: status, errorCode: errorCode, errorMsg: errorMsg };
         },
+        TEB_H5FILE_STATUS_CHANGED: function (status, data) {
+          if (data && typeof data === 'object') {
+            return Object.assign({ status: status }, data);
+          }
+          return { status: status, data: data || null };
+        },
         TEB_H5FILESTATUSCHANGED: function (fileId, status) { return { fileId: fileId, status: status }; },
+        TEB_VIDEO_STATUS_CHANGED: function (data) {
+          if (data && typeof data === 'object') return data;
+          return { data: data || null };
+        },
         TEB_VIDEOSTATUSCHANGED: function (fileId, status, progress, duration) {
           return { fileId: fileId, status: status, progress: progress, duration: duration };
         },
+        TEB_H5PPT_MEDIA_STATUS_CHANGED: function (status, data) {
+          if (data && typeof data === 'object') {
+            return Object.assign({ status: status }, data);
+          }
+          return { status: status, data: data || null };
+        },
         TEB_H5PPTMEDIASTATUSCHANGED: function (fileId, mediaId, status) {
           return { fileId: fileId, mediaId: mediaId, status: status };
+        },
+        TEB_H5PPT_STATUS_CHANGED: function (status, data) {
+          if (data && typeof data === 'object') {
+            return Object.assign({ status: status }, data);
+          }
+          return { status: status, data: data || null };
         },
         TEB_H5PPTSTATUSCHANGED: function (fileId, status, message) {
           return { fileId: fileId, status: status, message: message || null };
         },
         TEB_ADDIMAGESFILE: function (fileId) { return { fileId: fileId }; },
         TEB_ADDIMAGEELEMENT: function (url) { return { url: url }; },
+        TEB_REMOVEELEMENT: function (elementIds) { return { elementIds: elementIds }; },
+        TEB_SELECTED_ELEMENTS: function (elements) { return { elements: elements }; },
         TEB_SNAPSHOT: function (path, errorCode, errorMsg) {
           return { path: path, errorCode: errorCode, errorMsg: errorMsg };
+        },
+        TEB_AUDIO_STATUS_CHANGED: function (data) {
+          if (data && typeof data === 'object') return data;
+          return { data: data || null };
         },
         TEB_AUDIOSTATUSCHANGED: function (elementId, status, progress, duration) {
           return { elementId: elementId, status: status, progress: progress, duration: duration };
@@ -409,6 +488,10 @@
             if (eventKey === 'TEB_INIT') {
               handleBoardInitEvent();
               return;
+            }
+            if (eventKey === 'TEB_OFFLINE_WARNING' || eventKey === 'TEB_OFFLINE') {
+              boardReady = false;
+              updateDebugPanel('boardOffline', mapEventPayload(eventKey, args));
             }
             if (eventKey === 'TEB_ERROR') {
               updateDebugPanel('boardError', { code: args[0], message: args[1] });
@@ -629,7 +712,7 @@
               brushColor: tryBoardGet(['getBrushColor']),
               brushThin: tryBoardGet(['getBrushThin']),
               boardScale: tryBoardGet(['getBoardScale']),
-              drawEnable: tryBoardGet(['isDrawEnable', 'getDrawEnable'])
+              drawEnable: tryBoardGet(['isDrawEnable'])
             };
           });
         },
