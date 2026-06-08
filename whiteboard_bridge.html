@@ -340,6 +340,11 @@
 
       function resolveFlutterEventType(eventKey) {
         if (EVENT_FLUTTER_TYPE_MAP[eventKey]) return EVENT_FLUTTER_TYPE_MAP[eventKey];
+
+        // debug 模式下提示未在映射表中的事件，避免新增 SDK 事件被静默漏接。
+        if (bridgeConfig.debug) {
+          console.warn('[TEduBoardBridge] unmapped event: ' + eventKey);
+        }
         return eventKey.replace(/^TEB_/, '').toLowerCase().replace(/_([a-z])/g, function (_, c) {
           return c.toUpperCase();
         });
@@ -358,7 +363,11 @@
         for (var i = 0; i < methodNames.length; i += 1) {
           var fn = methodNames[i];
           if (typeof board[fn] === 'function') {
-            try { return board[fn](); } catch (e) { }
+            try {
+              return board[fn]();
+            } catch (e) {
+              console.warn('[TEduBoardBridge] tryBoardGet ' + fn + ' failed', e);
+            }
           }
         }
         return null;
@@ -602,7 +611,8 @@
               try {
                 syncPayload = JSON.parse(syncPayload);
               } catch (e) {
-                console.warn('[TEduBoardBridge] addSyncData JSON.parse failed', e);
+                // 直接抛错由 Flutter 感知
+                throw new Error('addSyncData JSON.parse failed: ' + (e && e.message));
               }
             }
             board.addSyncData(syncPayload);
@@ -663,17 +673,8 @@
         addBoardWithBackgroundImage: function (url) {
           return safely('addBoardWithBackgroundImage', function () {
             if (typeof board.addBoard !== 'function') throw new Error('addBoard unavailable');
-            var fitMode = TEduBoard.IMAGE_FIT_MODE
-              ? TEduBoard.IMAGE_FIT_MODE.TEDU_BOARD_IMAGE_FIT_MODE_CENTER
-              : undefined;
-            var bgImageType = 1;
-            if (TEduBoard.BACKGROUND_IMAGE && TEduBoard.BACKGROUND_IMAGE.TEDU_BOARD_BACKGROUND_IMAGE !== undefined) {
-              bgImageType = TEduBoard.BACKGROUND_IMAGE.TEDU_BOARD_BACKGROUND_IMAGE;
-            } else if (TEduBoard.BACKGROUND_IMAGE_TYPE &&
-              TEduBoard.BACKGROUND_IMAGE_TYPE.TEDU_BOARD_BACKGROUND_IMAGE !== undefined) {
-              bgImageType = TEduBoard.BACKGROUND_IMAGE_TYPE.TEDU_BOARD_BACKGROUND_IMAGE;
-            }
-            return { boardId: board.addBoard(url || null, fitMode, bgImageType, true) };
+            // SDK 2.9.13 addBoard 接收 options 对象，type 默认即背景图，mode 不传用 SDK 默认
+            return { boardId: board.addBoard({ url: url || null, needSwitch: true }) };
           });
         },
 
