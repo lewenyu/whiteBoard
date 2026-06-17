@@ -18,6 +18,7 @@
     #board-container {
       width: 100%;
       height: 100%;
+      touch-action: manipulation;
     }
 
     #debug-panel {
@@ -98,7 +99,7 @@
         'setSyncVideoStatusEnable', 'startSyncVideoStatus', 'stopSyncVideoStatus',
         'playAudio', 'pauseAudio', 'seekAudio', 'setAudioVolume', 'getAudioVolume',
         'muteAudio', 'setSyncAudioStatusEnable',
-        'setShowPPTAudioControls',
+        'setShowPPTAudioControls', 'enableAudioControl',
         'removeElement', 'getBoardElementList', 'getElementById', 'updateElementById',
         'snapshot', 'exportInLocalMode'
       ];
@@ -428,8 +429,25 @@
       }
 
       // =========================================================================
-      // 6. TEduBoard 
+      // 6. TEduBoard
       // =========================================================================
+      //
+      // PPT 内点击/音频（学生 WebView）必要配置，对齐原生 joinBoard(mouseTypeCanPagePPT:YES)：
+      // 1. init 时 mouseToolBehavior.h5PPT + audiovisual → 允许 PPT 内按钮/音视频响应点击
+      // 2. 禁止 disableDrawActionEventResponding(true) → 会拦截 PPT 内 click，只关 setDrawEnable
+      // 3. iOS WebView 收到 AUTHORITY_REQUEST 时需主动 playH5PPTAudio/Video
+      // 4. touch-action: manipulation → 减少 iPad 双击缩放对单击的干扰
+      //
+      var PPT_MOUSE_TOOL_BEHAVIOR = {
+        turnPage: {
+          whiteBoard: false,
+          h5PPT: true,
+          imgPPT: true,
+          imgFile: false,
+          audiovisual: true
+        }
+      };
+
       function ensureBoardReady() {
         if (!board) throw new Error('TEduBoard has not been initialized');
       }
@@ -444,19 +462,89 @@
         return result === undefined ? { success: true } : result;
       }
 
+      function applyDefaultMouseToolBehavior() {
+        ensureBoardReady();
+        if (typeof board.setMouseToolBehavior !== 'function') return;
+        board.setMouseToolBehavior({ turnPage: PPT_MOUSE_TOOL_BEHAVIOR.turnPage });
+      }
+
+      function applyPptInteractionSettings() {
+        ensureBoardReady();
+        if (typeof board.disablePointerEventResponding === 'function') {
+          board.disablePointerEventResponding(false);
+        }
+        if (typeof board.disableDrawActionEventResponding === 'function') {
+          board.disableDrawActionEventResponding(false);
+        }
+        applyDefaultMouseToolBehavior();
+        if (typeof board.enableAudioControl === 'function') {
+          board.enableAudioControl(true);
+        }
+        if (typeof board.setShowPPTAudioControls === 'function') {
+          board.setShowPPTAudioControls(true);
+        }
+      }
+
+      function handleH5PptMediaAuthority(eventKey, args) {
+        if (!board || !TEduBoard || !TEduBoard.TEduBoardH5PPTMediaStatus) return;
+        var AUTHORITY_REQUEST =
+          TEduBoard.TEduBoardH5PPTMediaStatus.TEDU_BOARD_H5_PPT_MEDIA_STATUS_AUTHORITY_REQUEST;
+        var status = args[0];
+        var mediaId = null;
+        if (eventKey === 'TEB_H5PPTMEDIASTATUSCHANGED') {
+          mediaId = args[1];
+          status = args[2];
+        } else if (args[1] && typeof args[1] === 'object') {
+          mediaId = args[1].mediaId || args[1].id || null;
+        }
+        if (status !== AUTHORITY_REQUEST) return;
+
+        var fileInfo = typeof board.getFileInfo === 'function' ? board.getFileInfo() : null;
+        var pptMedia = fileInfo && fileInfo.pptMediaInfo;
+        try {
+          if (typeof board.playH5PPTAudio === 'function') {
+            var audioIds = mediaId ? [mediaId] : (pptMedia && pptMedia.audioIDList);
+            if (audioIds && audioIds.length) {
+              board.playH5PPTAudio(audioIds);
+              return;
+            }
+          }
+          if (typeof board.playH5PPTVideo === 'function') {
+            var videoIds = mediaId ? [mediaId] : (pptMedia && pptMedia.videoIDList);
+            if (videoIds && videoIds.length) {
+              board.playH5PPTVideo(videoIds);
+            }
+          }
+        } catch (e) {
+          console.warn('[TEduBoardBridge] play H5PPT media failed', e);
+        }
+      }
+
+      function applyPptInteractionWhenLoaded(eventKey, args) {
+        if (!TEduBoard || !TEduBoard.TEduBoardH5PPTStatus) return;
+        var status = eventKey === 'TEB_H5PPTSTATUSCHANGED' ? args[1] : args[0];
+        if (status !== TEduBoard.TEduBoardH5PPTStatus.TEDU_BOARD_H5_PPT_STATUS_LOADED) return;
+        applyPptInteractionSettings();
+      }
+
       function applyDrawMode(mode) {
         ensureBoardReady();
         var nextMode = mode === 'browse' ? 'browse' : 'pen';
         currentDrawMode = nextMode;
+        var isBrowse = nextMode === 'browse';
 
-        if (typeof board.setDrawEnable === 'function') board.setDrawEnable(true);
-        if (typeof board.setDisableDrawActionEvent === 'function') {
-          board.setDisableDrawActionEvent(nextMode === 'browse');
+        if (typeof board.setDrawEnable === 'function') {
+          board.setDrawEnable(!isBrowse);
         }
         if (typeof board.setToolType === 'function' && TEduBoard && TEduBoard.TOOL_TYPE) {
-          board.setToolType(nextMode === 'browse'
+          board.setToolType(isBrowse
             ? TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_MOUSE
             : TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_PEN);
+        }
+        if (isBrowse) {
+          applyPptInteractionSettings();
+        } else {
+          applyDefaultMouseToolBehavior();
         }
         return { mode: nextMode };
       }
@@ -479,9 +567,8 @@
           currentFileId: tryBoardGet(['getCurrentFile'])
         };
         postToFlutter('boardReady', payload);
+        applyPptInteractionSettings();
         applyDrawMode(currentDrawMode);
-        var showPPTAudioControls = currentInitOptions && currentInitOptions.showPPTAudioControls;
-        applyShowPPTAudioControls(showPPTAudioControls !== false);
       }
 
       function bindBoardEvents() {
@@ -508,6 +595,12 @@
             } else if (eventKey === 'TEB_WARNING') {
               updateDebugPanel('boardWarning', { code: args[0], message: args[1] });
             }
+            if (eventKey === 'TEB_H5PPT_MEDIA_STATUS_CHANGED' || eventKey === 'TEB_H5PPTMEDIASTATUSCHANGED') {
+              handleH5PptMediaAuthority(eventKey, args);
+            }
+            if (eventKey === 'TEB_H5PPT_STATUS_CHANGED' || eventKey === 'TEB_H5PPTSTATUSCHANGED') {
+              applyPptInteractionWhenLoaded(eventKey, args);
+            }
 
             postToFlutter(resolveFlutterEventType(eventKey), mapEventPayload(eventKey, args));
           });
@@ -532,7 +625,13 @@
             dataSyncEnable: true,
             drawEnable: options.authConfig && options.authConfig.drawEnable !== undefined
               ? options.authConfig.drawEnable
-              : true
+              : true,
+            progressEnable: options.authConfig && options.authConfig.progressEnable !== undefined
+              ? options.authConfig.progressEnable
+              : true,
+            mouseToolBehavior: Object.assign({
+              turnPage: PPT_MOUSE_TOOL_BEHAVIOR.turnPage
+            }, (options.authConfig && options.authConfig.mouseToolBehavior) || {})
           })
         });
 
@@ -647,8 +746,17 @@
             if (!TEduBoard || !TEduBoard.TOOL_TYPE) throw new Error('TEduBoard.TOOL_TYPE unavailable');
             var toolKey = TOOL_NAME_MAP[name];
             if (!toolKey || !TEduBoard.TOOL_TYPE[toolKey]) throw new Error('Unknown tool: ' + name);
+            var isMouse = name === 'mouse';
+            if (typeof board.setDrawEnable === 'function') {
+              board.setDrawEnable(!isMouse);
+            }
             board.setToolType(TEduBoard.TOOL_TYPE[toolKey]);
-            currentDrawMode = name === 'mouse' ? 'browse' : 'pen';
+            currentDrawMode = isMouse ? 'browse' : 'pen';
+            if (isMouse) {
+              applyPptInteractionSettings();
+            } else {
+              applyDefaultMouseToolBehavior();
+            }
             return { tool: name, drawMode: currentDrawMode };
           });
         },
