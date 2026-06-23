@@ -112,7 +112,7 @@
         TEB_SYNCDATA: 'syncData',
         TEB_HISTROYDATA_SYNCCOMPLETED: 'historyDataSyncCompleted',
         TEB_OFFLINE: 'boardOffline',
-        TEB_OFFLINE_WARNING: 'boardOffline',
+        TEB_OFFLINE_WARNING: 'boardWarning',
         TEB_OPERATE_CANUNDO_STATUS_CHANGED: 'undoStatusChanged',
         TEB_OPERATE_CANREDO_STATUS_CHANGED: 'redoStatusChanged',
         TEB_UNDOSTATUSCHANGED: 'undoStatusChanged',
@@ -450,6 +450,7 @@
 
       function ensureBoardReady() {
         if (!board) throw new Error('TEduBoard has not been initialized');
+        if (!boardReady) throw new Error('TEduBoard is offline or reloading');
       }
 
       function invokeBoardMethod(method, args) {
@@ -586,9 +587,24 @@
               handleBoardInitEvent();
               return;
             }
-            if (eventKey === 'TEB_OFFLINE_WARNING' || eventKey === 'TEB_OFFLINE') {
+            if (eventKey === 'TEB_OFFLINE_WARNING') {
+              // 连接预警，不置 offline；上报 Flutter 便于排查，但不触发 syncAndReload
+              updateDebugPanel('boardOfflineWarning', mapEventPayload(eventKey, args));
+              postToFlutter('boardWarning', Object.assign(
+                { subtype: 'offline_warning' },
+                mapEventPayload(eventKey, args)
+              ));
+              return;
+            }
+            if (eventKey === 'TEB_OFFLINE') {
               boardReady = false;
               updateDebugPanel('boardOffline', mapEventPayload(eventKey, args));
+              postToFlutter('boardOffline', mapEventPayload(eventKey, args));
+              return;
+            }
+            if (eventKey === 'TEB_HISTROYDATA_SYNCCOMPLETED') {
+              // syncAndReload 不会重走 TEB_INIT，历史同步完成后需恢复 boardReady
+              boardReady = true;
             }
             if (eventKey === 'TEB_ERROR') {
               updateDebugPanel('boardError', { code: args[0], message: args[1] });
@@ -705,13 +721,15 @@
 
         addSyncData: function (data) {
           return safely('addSyncData', function () {
-            ensureBoardReady();
+            if (!board) throw new Error('TEduBoard has not been initialized');
+            if (!boardReady) {
+              return { success: false, reason: 'board_not_ready' };
+            }
             var syncPayload = data;
             if (typeof syncPayload === 'string') {
               try {
                 syncPayload = JSON.parse(syncPayload);
               } catch (e) {
-                // 直接抛错由 Flutter 感知
                 throw new Error('addSyncData JSON.parse failed: ' + (e && e.message));
               }
             }
@@ -851,6 +869,14 @@
       };
 
       attachBoardInvokeMethods(bridgeApi, BOARD_INVOKE_METHODS);
+
+      // syncAndReload 期间暂停增量写入，待 TEB_HISTROYDATA_SYNCCOMPLETED 恢复
+      bridgeApi.syncAndReload = function () {
+        return safely('syncAndReload', function () {
+          boardReady = false;
+          return invokeBoardMethod('syncAndReload');
+        });
+      };
 
       // =========================================================================
       // 8. 启动
