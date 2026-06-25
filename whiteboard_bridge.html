@@ -870,11 +870,17 @@
 
       attachBoardInvokeMethods(bridgeApi, BOARD_INVOKE_METHODS);
 
-      // syncAndReload 期间暂停增量写入，待 TEB_HISTROYDATA_SYNCCOMPLETED 恢复
+      // 调用 board.syncAndReload()，置 boardReady=false 暂停增量写入，
+      // 待 TEB_HISTROYDATA_SYNCCOMPLETED 恢复。
       bridgeApi.syncAndReload = function () {
         return safely('syncAndReload', function () {
+          if (!board) throw new Error('TEduBoard has not been initialized');
+          if (typeof board.syncAndReload !== 'function') {
+            throw new Error('board.syncAndReload is not a function');
+          }
           boardReady = false;
-          return invokeBoardMethod('syncAndReload');
+          board.syncAndReload();
+          return { success: true };
         });
       };
 
