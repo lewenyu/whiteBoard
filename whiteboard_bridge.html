@@ -73,6 +73,7 @@
       var DEBUG_PANEL_ID = 'debug-panel';
       var TOOL_NAME_MAP = {
         pen: 'TEDU_BOARD_TOOL_TYPE_PEN',
+        text: 'TEDU_BOARD_TOOL_TYPE_TEXT',
         eraser: 'TEDU_BOARD_TOOL_TYPE_ERASER',
         mouse: 'TEDU_BOARD_TOOL_TYPE_MOUSE'
       };
@@ -84,6 +85,7 @@
         'setAccessibleUsers',
         'enablePermissionChecker', 'disablePermissionChecker', 'resetPermissionChecker',
         'setBrushColor', 'setBrushThin', 'setTextColor', 'setTextStyle', 'setTextSize',
+        'setTextValue', 'setTextFontFamily', 'addTextFontFamily', 'setTextLineHeight', 'setTextSizeMode',
         'undo', 'redo', 'clear', 'clearDraws', 'clearFileDraws', 'setToolType',
         'getToolType', 'getBrushColor', 'getBrushThin',
         'setEraserSize', 'getEraserSize', 'setHighlighterColor', 'getHighlighterColor',
@@ -275,8 +277,64 @@
         },
         TEB_AUDIOSTATUSCHANGED: function (elementId, status, progress, duration) {
           return { elementId: elementId, status: status, progress: progress, duration: duration };
-        }
+        },
+        TEB_TEXT_ELEMENT_STATUS_CHANGED: mapTextElementStatusPayload,
+        TEB_TEXT_COMPONENT_STATUS_CHANGE: mapTextElementStatusPayload,
+        TEB_TEXTCOMPONENTSTATUSCHANGED: mapTextElementStatusPayload,
+        TEB_TEXT_ELEMENT_WARNING: mapTextElementWarningPayload,
+        TEB_TEXTWARN: mapTextElementWarningPayload
       };
+
+      /** Web SDK 2.x 传 object；旧版/原生对齐可能传多参数 */
+      function mapTextElementStatusPayload() {
+        var args = Array.prototype.slice.call(arguments);
+        if (args.length === 1 && args[0] && typeof args[0] === 'object') {
+          var data = args[0];
+          return {
+            status: data.status != null ? data.status : null,
+            elementId: data.id || data.elementId || null,
+            value: data.value != null ? data.value : null,
+            left: data.left != null ? data.left : null,
+            top: data.top != null ? data.top : null
+          };
+        }
+        if (args.length >= 5) {
+          var first = args[0];
+          var second = args[1];
+          if (first === 'focus' || first === 'blur') {
+            return {
+              status: first,
+              elementId: second,
+              value: args[2] != null ? args[2] : null,
+              left: args[3] != null ? args[3] : null,
+              top: args[4] != null ? args[4] : null
+            };
+          }
+          return {
+            elementId: first,
+            status: second,
+            value: args[2] != null ? args[2] : null,
+            left: args[3] != null ? args[3] : null,
+            top: args[4] != null ? args[4] : null
+          };
+        }
+        return args[0] || null;
+      }
+
+      function mapTextElementWarningPayload() {
+        var args = Array.prototype.slice.call(arguments);
+        if (args.length === 1 && args[0] && typeof args[0] === 'object') {
+          var data = args[0];
+          return {
+            code: data.code != null ? data.code : null,
+            message: data.message || data.msg || null
+          };
+        }
+        return {
+          code: args[0] != null ? args[0] : null,
+          message: args[1] || null
+        };
+      }
 
       // =========================================================================
       // 2. 运行时状态
@@ -285,6 +343,7 @@
       var board = null;
       var boardReady = false;
       var currentDrawMode = 'pen';
+      var currentToolName = 'pen';
       var currentInitOptions = null;
       var syncChannel = null;
       var syncChannelName = '';
@@ -569,7 +628,15 @@
         };
         postToFlutter('boardReady', payload);
         applyPptInteractionSettings();
-        applyDrawMode(currentDrawMode);
+        if (currentToolName === 'mouse' || currentDrawMode === 'browse') {
+          applyDrawMode('browse');
+        } else if (currentToolName && TOOL_NAME_MAP[currentToolName]) {
+          board.setDrawEnable(true);
+          board.setToolType(TEduBoard.TOOL_TYPE[TOOL_NAME_MAP[currentToolName]]);
+          applyDefaultMouseToolBehavior();
+        } else {
+          applyDrawMode(currentDrawMode);
+        }
       }
 
       function bindBoardEvents() {
@@ -765,6 +832,7 @@
             var toolKey = TOOL_NAME_MAP[name];
             if (!toolKey || !TEduBoard.TOOL_TYPE[toolKey]) throw new Error('Unknown tool: ' + name);
             var isMouse = name === 'mouse';
+            currentToolName = name;
             if (typeof board.setDrawEnable === 'function') {
               board.setDrawEnable(!isMouse);
             }
@@ -869,6 +937,7 @@
       };
 
       attachBoardInvokeMethods(bridgeApi, BOARD_INVOKE_METHODS);
+
 
       // 调用 board.syncAndReload()，置 boardReady=false 暂停增量写入，
       // 待 TEB_HISTROYDATA_SYNCCOMPLETED 恢复。
