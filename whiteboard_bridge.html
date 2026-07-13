@@ -21,6 +21,10 @@
       touch-action: manipulation;
     }
 
+    #board-container.is-continuous-stroke-tool {
+      touch-action: none;
+    }
+
     #debug-panel {
       display: none;
       position: fixed;
@@ -343,6 +347,9 @@
       var boardReady = false;
       var currentDrawMode = 'pen';
       var currentToolName = 'pen';
+      var continuousStrokeEnabled = true;
+      var continuousStrokeTouchIds = {};
+      var continuousStrokeMouseActive = false;
       var currentInitOptions = null;
       var syncChannel = null;
       var syncChannelName = '';
@@ -436,7 +443,114 @@
       }
 
       // =========================================================================
-      // 4. Flutter 通信
+      // 4. 连笔边界保护
+      // =========================================================================
+      // Web SDK 2.9.13 会在 touchmove 坐标超出白板时直接执行 up，鼠标离开
+      // boardWrap 时也会结束笔画。这里在 SDK 监听器之前拦截临时出界事件，
+      // 保留同一次按压；触点回到白板后，后续 move 会继续当前笔画。
+      function isContinuousStrokeToolActive() {
+        if (!continuousStrokeEnabled || !boardReady || currentDrawMode === 'browse') return false;
+        if (!board || currentToolName !== 'pen') return false;
+        try {
+          if (typeof board.isDrawEnable === 'function' && !board.isDrawEnable()) return false;
+          if (typeof board.getToolType === 'function' && TEduBoard && TEduBoard.TOOL_TYPE) {
+            return board.getToolType() === TEduBoard.TOOL_TYPE.TEDU_BOARD_TOOL_TYPE_PEN;
+          }
+        } catch (e) {
+          return false;
+        }
+        return true;
+      }
+
+      function getBoardBox() {
+        var container = document.getElementById(BOARD_CONTAINER_ID);
+        return container && container.querySelector('.tx_board_canvas_box');
+      }
+
+      function isPointInsideBoard(point, boardBox) {
+        if (!point || !boardBox) return false;
+        var rect = boardBox.getBoundingClientRect();
+        return point.clientX >= rect.left && point.clientX <= rect.right &&
+          point.clientY >= rect.top && point.clientY <= rect.bottom;
+      }
+
+      function hasContinuousStrokeTouch() {
+        return Object.keys(continuousStrokeTouchIds).length > 0;
+      }
+
+      function resetContinuousStrokeState() {
+        continuousStrokeTouchIds = {};
+        continuousStrokeMouseActive = false;
+      }
+
+      function updateContinuousStrokeTouchAction() {
+        var container = document.getElementById(BOARD_CONTAINER_ID);
+        if (!container) return;
+        container.classList.toggle(
+          'is-continuous-stroke-tool',
+          !!continuousStrokeEnabled && currentDrawMode !== 'browse' && currentToolName === 'pen'
+        );
+      }
+
+      function installContinuousStrokeBoundaryGuard() {
+        var container = document.getElementById(BOARD_CONTAINER_ID);
+        if (!container) return;
+
+        container.addEventListener('touchstart', function (event) {
+          if (!isContinuousStrokeToolActive()) return;
+          var boardBox = getBoardBox();
+          Array.prototype.forEach.call(event.changedTouches || [], function (touch) {
+            if (isPointInsideBoard(touch, boardBox)) {
+              continuousStrokeTouchIds[String(touch.identifier)] = true;
+            }
+          });
+        }, { capture: true, passive: false });
+
+        container.addEventListener('touchmove', function (event) {
+          if (!isContinuousStrokeToolActive() || !hasContinuousStrokeTouch()) return;
+          var boardBox = getBoardBox();
+          var movedOutside = Array.prototype.some.call(event.changedTouches || [], function (touch) {
+            return continuousStrokeTouchIds[String(touch.identifier)] &&
+              !isPointInsideBoard(touch, boardBox);
+          });
+          if (!movedOutside) return;
+
+          if (event.cancelable) event.preventDefault();
+          event.stopImmediatePropagation();
+        }, { capture: true, passive: false });
+
+        function removeEndedTouches(event) {
+          Array.prototype.forEach.call(event.changedTouches || [], function (touch) {
+            delete continuousStrokeTouchIds[String(touch.identifier)];
+          });
+        }
+
+        container.addEventListener('touchend', removeEndedTouches, { capture: true, passive: true });
+        container.addEventListener('touchcancel', removeEndedTouches, { capture: true, passive: true });
+
+        container.addEventListener('mousedown', function (event) {
+          if (event.button !== 0 || !isContinuousStrokeToolActive()) return;
+          continuousStrokeMouseActive = isPointInsideBoard(event, getBoardBox());
+        }, true);
+
+        // mouseleave 不冒泡，但会经过捕获阶段；只拦截 SDK 的白板事件层。
+        container.addEventListener('mouseleave', function (event) {
+          if (!continuousStrokeMouseActive || !isContinuousStrokeToolActive()) return;
+          var target = event.target;
+          if (!target || !target.classList || !target.classList.contains('tx_board_canvas_wrap')) return;
+          if (event.cancelable) event.preventDefault();
+          event.stopImmediatePropagation();
+        }, true);
+
+        document.addEventListener('mouseup', function () {
+          continuousStrokeMouseActive = false;
+        }, true);
+        window.addEventListener('blur', resetContinuousStrokeState);
+        updateContinuousStrokeTouchAction();
+      }
+
+      // =========================================================================
+      // 5. Flutter 通信
       // =========================================================================
       function postToFlutter(type, payload) {
         // syncData：上报 Flutter，由 ImManager(V2TIM) 发到白板群（勿在 H5 再登 tim-js-sdk）
@@ -472,7 +586,7 @@
       }
 
       // =========================================================================
-      // 5. BroadcastChannel（多标签同步，单 WebView 场景不使用）
+      // 6. BroadcastChannel（多标签同步，单 WebView 场景不使用）
       // =========================================================================
       function resetSyncChannel(classId) {
         if (syncChannel) {
@@ -489,7 +603,7 @@
       }
 
       // =========================================================================
-      // 6. TEduBoard
+      // 7. TEduBoard
       // =========================================================================
       //
       // PPT 内点击/音频（学生 WebView）必要配置，对齐原生 joinBoard(mouseTypeCanPagePPT:YES)：
@@ -620,6 +734,8 @@
         currentDrawMode = nextMode;
         var isBrowse = nextMode === 'browse';
         currentToolName = isBrowse ? 'mouse' : 'pen';
+        resetContinuousStrokeState();
+        updateContinuousStrokeTouchAction();
 
         if (typeof board.setDrawEnable === 'function') {
           board.setDrawEnable(!isBrowse);
@@ -728,6 +844,9 @@
 
         boardReady = false;
         playingH5PptMediaId = null;
+        resetContinuousStrokeState();
+        continuousStrokeEnabled = options.continuousStrokeEnabled !== false;
+        updateContinuousStrokeTouchAction();
         if (options.pptTurnPageEnabled === false) {
           pptTurnPageEnabled = false;
         } else if (options.pptTurnPageEnabled === true) {
@@ -767,6 +886,7 @@
         if (board && typeof board.destroy === 'function') board.destroy();
         board = null;
         boardReady = false;
+        resetContinuousStrokeState();
         postToFlutter('boardDestroyed', null);
         updateDebugPanel('boardDestroyed', {});
         return { success: true };
@@ -782,10 +902,10 @@
       }
 
       // =========================================================================
-      // 7. window.WhiteboardWebBridge（Flutter 入口）
+      // 8. window.WhiteboardWebBridge（Flutter 入口）
       // =========================================================================
       var bridgeApi = {
-        version: '1.1.0',
+        version: '1.2.0',
 
         init: function (options) {
           return safely('init', function () {
@@ -867,11 +987,13 @@
             if (!toolKey || !TEduBoard.TOOL_TYPE[toolKey]) throw new Error('Unknown tool: ' + name);
             var isMouse = name === 'mouse';
             currentToolName = name;
+            resetContinuousStrokeState();
             if (typeof board.setDrawEnable === 'function') {
               board.setDrawEnable(!isMouse);
             }
             board.setToolType(TEduBoard.TOOL_TYPE[toolKey]);
             currentDrawMode = isMouse ? 'browse' : 'pen';
+            updateContinuousStrokeTouchAction();
             if (isMouse) {
               applyPptInteractionSettings();
             } else {
@@ -953,6 +1075,13 @@
           return { success: true, bridgeConfig: bridgeConfig };
         },
 
+        setContinuousStrokeEnabled: function (enabled) {
+          continuousStrokeEnabled = enabled !== false;
+          resetContinuousStrokeState();
+          updateContinuousStrokeTouchAction();
+          return { success: true, enabled: continuousStrokeEnabled };
+        },
+
         getState: function () {
           return {
             hasBoard: !!board,
@@ -960,6 +1089,7 @@
             bridgeConfig: bridgeConfig,
             options: sanitizeOptionsForLog(currentInitOptions),
             drawMode: currentDrawMode,
+            continuousStrokeEnabled: continuousStrokeEnabled,
             syncChannel: syncChannelName
           };
         },
@@ -988,7 +1118,7 @@
       };
 
       // =========================================================================
-      // 8. 启动
+      // 9. 启动
       // =========================================================================
       function isFlutterChannelReady() {
         var channel = window[bridgeConfig.flutterChannel];
@@ -1018,6 +1148,7 @@
       }
 
       function bootstrap() {
+        installContinuousStrokeBoundaryGuard();
         if (bridgeConfig.debug) {
           var debugPanel = document.getElementById(DEBUG_PANEL_ID);
           if (debugPanel) debugPanel.classList.add('is-visible');
