@@ -247,11 +247,9 @@
         TEB_VIDEOSTATUSCHANGED: function (fileId, status, progress, duration) {
           return { fileId: fileId, status: status, progress: progress, duration: duration };
         },
-        TEB_H5PPT_MEDIA_STATUS_CHANGED: function (status, data) {
-          if (data && typeof data === 'object') {
-            return Object.assign({ status: status }, data);
-          }
-          return { status: status, data: data || null };
+        // Web SDK: (fileId, mediaId, status, currentTime)
+        TEB_H5PPT_MEDIA_STATUS_CHANGED: function (fileId, mediaId, status, currentTime) {
+          return { fileId: fileId, mediaId: mediaId, status: status, currentTime: currentTime };
         },
         TEB_H5PPTMEDIASTATUSCHANGED: function (fileId, mediaId, status) {
           return { fileId: fileId, mediaId: mediaId, status: status };
@@ -348,6 +346,8 @@
       var currentInitOptions = null;
       var syncChannel = null;
       var syncChannelName = '';
+      /** 当前正在播放的 H5PPT 媒体 ID */
+      var playingH5PptMediaId = null;
 
       // =========================================================================
       // 3. 工具函数
@@ -545,41 +545,63 @@
         if (typeof board.enableAudioControl === 'function') {
           board.enableAudioControl(true);
         }
+        // 与 Flutter 侧一致：隐藏 PPT 内置音频控制条
         if (typeof board.setShowPPTAudioControls === 'function') {
-          board.setShowPPTAudioControls(true);
+          board.setShowPPTAudioControls(false);
         }
       }
 
+      // Web SDK 事件参数: (fileId, mediaId, status, currentTime)
       function handleH5PptMediaAuthority(eventKey, args) {
         if (!board || !TEduBoard || !TEduBoard.TEduBoardH5PPTMediaStatus) return;
-        var AUTHORITY_REQUEST =
-          TEduBoard.TEduBoardH5PPTMediaStatus.TEDU_BOARD_H5_PPT_MEDIA_STATUS_AUTHORITY_REQUEST;
-        var status = args[0];
-        var mediaId = null;
-        if (eventKey === 'TEB_H5PPTMEDIASTATUSCHANGED') {
-          mediaId = args[1];
-          status = args[2];
-        } else if (args[1] && typeof args[1] === 'object') {
+        var MediaStatus = TEduBoard.TEduBoardH5PPTMediaStatus;
+        var mediaId = args[1];
+        var status = args[2];
+        if (status == null && args[1] && typeof args[1] === 'object') {
           mediaId = args[1].mediaId || args[1].id || null;
+          status = args[0];
         }
-        if (status !== AUTHORITY_REQUEST) return;
+        if (!mediaId) return;
+
+        if (status === MediaStatus.TEDU_BOARD_H5_PPT_MEDIA_STATUS_PAUSE) {
+          if (playingH5PptMediaId === mediaId) playingH5PptMediaId = null;
+          return;
+        }
+        if (status !== MediaStatus.TEDU_BOARD_H5_PPT_MEDIA_STATUS_AUTHORITY_REQUEST &&
+          status !== MediaStatus.TEDU_BOARD_H5_PPT_MEDIA_STATUS_PLAY) {
+          return;
+        }
 
         var fileInfo = typeof board.getFileInfo === 'function' ? board.getFileInfo() : null;
-        var pptMedia = fileInfo && fileInfo.pptMediaInfo;
+        var pptMedia = fileInfo && (fileInfo.pptMediaInfo || fileInfo.mediaInfo);
+        var audioIds = (pptMedia && pptMedia.audioIDList) || [];
+        var videoIds = (pptMedia && pptMedia.videoIDList) || [];
+        var pauseAudios = audioIds.filter(function (id) { return id !== mediaId; });
+        var pauseVideos = videoIds.filter(function (id) { return id !== mediaId; });
+
         try {
-          if (typeof board.playH5PPTAudio === 'function') {
-            var audioIds = mediaId ? [mediaId] : (pptMedia && pptMedia.audioIDList);
-            if (audioIds && audioIds.length) {
-              board.playH5PPTAudio(audioIds);
-              return;
+          if (playingH5PptMediaId && playingH5PptMediaId !== mediaId) {
+            if (typeof board.pauseH5PPTAudio === 'function') {
+              board.pauseH5PPTAudio([playingH5PptMediaId]);
+            }
+            if (typeof board.pauseH5PPTVideo === 'function') {
+              board.pauseH5PPTVideo([playingH5PptMediaId]);
             }
           }
-          if (typeof board.playH5PPTVideo === 'function') {
-            var videoIds = mediaId ? [mediaId] : (pptMedia && pptMedia.videoIDList);
-            if (videoIds && videoIds.length) {
-              board.playH5PPTVideo(videoIds);
+          if (pauseAudios.length && typeof board.pauseH5PPTAudio === 'function') {
+            board.pauseH5PPTAudio(pauseAudios);
+          }
+          if (pauseVideos.length && typeof board.pauseH5PPTVideo === 'function') {
+            board.pauseH5PPTVideo(pauseVideos);
+          }
+          if (status === MediaStatus.TEDU_BOARD_H5_PPT_MEDIA_STATUS_AUTHORITY_REQUEST) {
+            if (videoIds.indexOf(mediaId) >= 0 && typeof board.playH5PPTVideo === 'function') {
+              board.playH5PPTVideo([mediaId]);
+            } else if (typeof board.playH5PPTAudio === 'function') {
+              board.playH5PPTAudio([mediaId]);
             }
           }
+          playingH5PptMediaId = mediaId;
         } catch (e) {
           console.warn('[TEduBoardBridge] play H5PPT media failed', e);
         }
@@ -705,6 +727,7 @@
         if (board && typeof board.destroy === 'function') board.destroy();
 
         boardReady = false;
+        playingH5PptMediaId = null;
         if (options.pptTurnPageEnabled === false) {
           pptTurnPageEnabled = false;
         } else if (options.pptTurnPageEnabled === true) {
