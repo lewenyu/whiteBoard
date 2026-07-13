@@ -84,6 +84,7 @@
         'setDrawEnable', 'isDrawEnable', 'setHandwritingEnable', 'setBoardScale', 'getBoardScale',
         'setAccessibleUsers',
         'enablePermissionChecker', 'disablePermissionChecker', 'resetPermissionChecker',
+        'setMouseToolBehavior',
         'setBrushColor', 'setBrushThin', 'setTextColor', 'setTextStyle', 'setTextSize',
         'setTextValue', 'setTextFontFamily', 'addTextFontFamily', 'setTextLineHeight', 'setTextSizeMode',
         'undo', 'redo', 'clear', 'clearDraws', 'clearFileDraws', 'setToolType',
@@ -285,7 +286,7 @@
         TEB_TEXTWARN: mapTextElementWarningPayload
       };
 
-      /** Web SDK 2.x 传 object；旧版/原生对齐可能传多参数 */
+      /** Web SDK 2.x 传 object；旧版/原生对齐可能传多参数。文本状态归一化处理 */
       function mapTextElementStatusPayload() {
         var args = Array.prototype.slice.call(arguments);
         if (args.length === 1 && args[0] && typeof args[0] === 'object') {
@@ -497,15 +498,19 @@
       // 3. iOS WebView 收到 AUTHORITY_REQUEST 时需主动 playH5PPTAudio/Video
       // 4. touch-action: manipulation → 减少 iPad 双击缩放对单击的干扰
       //
-      var PPT_MOUSE_TOOL_BEHAVIOR = {
-        turnPage: {
+      // pptTurnPageEnabled：控制 h5PPT/imgPPT 点击（含 PPT 内交互）。
+      // 学生禁止翻页请用 SDK enablePermissionChecker(Board::Switch::Page)，勿置 false。
+      var pptTurnPageEnabled = true;
+
+      function buildMouseTurnPageBehavior() {
+        return {
           whiteBoard: false,
-          h5PPT: true,
-          imgPPT: true,
+          h5PPT: pptTurnPageEnabled,
+          imgPPT: pptTurnPageEnabled,
           imgFile: false,
           audiovisual: true
-        }
-      };
+        };
+      }
 
       function ensureBoardReady() {
         if (!board) throw new Error('TEduBoard has not been initialized');
@@ -525,7 +530,7 @@
       function applyDefaultMouseToolBehavior() {
         ensureBoardReady();
         if (typeof board.setMouseToolBehavior !== 'function') return;
-        board.setMouseToolBehavior({ turnPage: PPT_MOUSE_TOOL_BEHAVIOR.turnPage });
+        board.setMouseToolBehavior({ turnPage: buildMouseTurnPageBehavior() });
       }
 
       function applyPptInteractionSettings() {
@@ -592,6 +597,7 @@
         var nextMode = mode === 'browse' ? 'browse' : 'pen';
         currentDrawMode = nextMode;
         var isBrowse = nextMode === 'browse';
+        currentToolName = isBrowse ? 'mouse' : 'pen';
 
         if (typeof board.setDrawEnable === 'function') {
           board.setDrawEnable(!isBrowse);
@@ -699,6 +705,11 @@
         if (board && typeof board.destroy === 'function') board.destroy();
 
         boardReady = false;
+        if (options.pptTurnPageEnabled === false) {
+          pptTurnPageEnabled = false;
+        } else if (options.pptTurnPageEnabled === true) {
+          pptTurnPageEnabled = true;
+        }
         // 由 Flutter V2TIM 转发时需 dataSyncEnable=true 以产生 syncData 事件。
         var initParams = Object.assign({}, options, {
           id: options.id || BOARD_CONTAINER_ID,
@@ -713,7 +724,7 @@
               ? options.authConfig.progressEnable
               : true,
             mouseToolBehavior: Object.assign({
-              turnPage: PPT_MOUSE_TOOL_BEHAVIOR.turnPage
+              turnPage: buildMouseTurnPageBehavior()
             }, (options.authConfig && options.authConfig.mouseToolBehavior) || {})
           })
         });
