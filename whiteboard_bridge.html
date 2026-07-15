@@ -585,6 +585,32 @@
         }
       }
 
+      /** Flutter 高频同步入口不发送 methodResult，避免每个信令再跨一次 JS -> Flutter。 */
+      function applySyncDataBatch(dataList) {
+        if (!board) throw new Error('TEduBoard has not been initialized');
+        if (!boardReady) {
+          return { success: false, reason: 'board_not_ready' };
+        }
+
+        var list = Array.isArray(dataList) ? dataList : [dataList];
+        var payloads = [];
+        for (var i = 0; i < list.length; i += 1) {
+          var syncPayload = list[i];
+          if (typeof syncPayload === 'string') {
+            try {
+              syncPayload = JSON.parse(syncPayload);
+            } catch (e) {
+              throw new Error('addSyncData JSON.parse failed at index ' + i + ': ' + (e && e.message));
+            }
+          }
+          payloads.push(syncPayload);
+        }
+        for (var j = 0; j < payloads.length; j += 1) {
+          board.addSyncData(payloads[j]);
+        }
+        return { success: true, count: list.length };
+      }
+
       // =========================================================================
       // 6. BroadcastChannel（多标签同步，单 WebView 场景不使用）
       // =========================================================================
@@ -905,7 +931,7 @@
       // 8. window.WhiteboardWebBridge（Flutter 入口）
       // =========================================================================
       var bridgeApi = {
-        version: '1.2.0',
+        version: '1.3.0',
 
         init: function (options) {
           return safely('init', function () {
@@ -941,22 +967,11 @@
         },
 
         addSyncData: function (data) {
-          return safely('addSyncData', function () {
-            if (!board) throw new Error('TEduBoard has not been initialized');
-            if (!boardReady) {
-              return { success: false, reason: 'board_not_ready' };
-            }
-            var syncPayload = data;
-            if (typeof syncPayload === 'string') {
-              try {
-                syncPayload = JSON.parse(syncPayload);
-              } catch (e) {
-                throw new Error('addSyncData JSON.parse failed: ' + (e && e.message));
-              }
-            }
-            board.addSyncData(syncPayload);
-            return { success: true };
-          });
+          return applySyncDataBatch([data]);
+        },
+
+        addSyncDataBatch: function (dataList) {
+          return applySyncDataBatch(dataList);
         },
 
         resize: function () {
