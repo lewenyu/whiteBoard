@@ -586,29 +586,22 @@
       }
 
       /** Flutter 高频同步入口不发送 methodResult，避免每个信令再跨一次 JS -> Flutter。 */
-      function applySyncDataBatch(dataList) {
+      function applySyncData(data) {
         if (!board) throw new Error('TEduBoard has not been initialized');
         if (!boardReady) {
           return { success: false, reason: 'board_not_ready' };
         }
 
-        var list = Array.isArray(dataList) ? dataList : [dataList];
-        var payloads = [];
-        for (var i = 0; i < list.length; i += 1) {
-          var syncPayload = list[i];
-          if (typeof syncPayload === 'string') {
-            try {
-              syncPayload = JSON.parse(syncPayload);
-            } catch (e) {
-              throw new Error('addSyncData JSON.parse failed at index ' + i + ': ' + (e && e.message));
-            }
+        var syncPayload = data;
+        if (typeof syncPayload === 'string') {
+          try {
+            syncPayload = JSON.parse(syncPayload);
+          } catch (e) {
+            throw new Error('addSyncData JSON.parse failed: ' + (e && e.message));
           }
-          payloads.push(syncPayload);
         }
-        for (var j = 0; j < payloads.length; j += 1) {
-          board.addSyncData(payloads[j]);
-        }
-        return { success: true, count: list.length };
+        board.addSyncData(syncPayload);
+        return { success: true };
       }
 
       // =========================================================================
@@ -967,11 +960,7 @@
         },
 
         addSyncData: function (data) {
-          return applySyncDataBatch([data]);
-        },
-
-        addSyncDataBatch: function (dataList) {
-          return applySyncDataBatch(dataList);
+          return applySyncData(data);
         },
 
         resize: function () {
