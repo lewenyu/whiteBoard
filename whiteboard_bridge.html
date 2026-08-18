@@ -4,6 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- App loadHtmlString baseUrl 与线上 OSS 白板目录一致；standalone 浏览器调试时相对路径解析同线上一致 -->
+  <base href="https://lstyty.oss-cn-hangzhou.aliyuncs.com/wechat/client/whiteboard/fifth/">
   <title>TEduBoard Bridge</title>
   <style>
     html,
@@ -23,6 +25,32 @@
 
     #board-container.is-continuous-stroke-tool {
       touch-action: none;
+    }
+
+    #board-placeholder {
+      position: fixed;
+      inset: 0;
+      z-index: 9000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #f5f7fb;
+      color: #334155;
+      font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    #board-placeholder.is-hidden {
+      display: none;
+    }
+
+    #board-placeholder strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 16px;
+      color: #0f172a;
     }
 
     #debug-panel {
@@ -52,17 +80,130 @@
       margin-bottom: 8px;
       color: #f8fafc;
     }
+
+    #standalone-bar {
+      display: none;
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      z-index: 10000;
+      width: min(520px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+      font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #0f172a;
+    }
+
+    #standalone-bar.is-visible {
+      display: block;
+    }
+
+    #standalone-bar label {
+      display: block;
+      margin-top: 6px;
+      font-weight: 600;
+    }
+
+    #standalone-bar input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 4px;
+      padding: 6px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font: 12px/1.4 Menlo, Monaco, Consolas, monospace;
+    }
+
+    #standalone-bar button {
+      margin-top: 10px;
+      margin-right: 8px;
+      padding: 6px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    #event-log {
+      display: none;
+      position: fixed;
+      left: 12px;
+      top: 12px;
+      z-index: 9998;
+      width: min(520px, calc(100vw - 24px));
+      max-height: min(40vh, 360px);
+      overflow: auto;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.92);
+      color: #e2e8f0;
+      font: 11px/1.45 Menlo, Monaco, Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    #event-log.is-visible {
+      display: block;
+    }
+
+    #event-log strong {
+      display: block;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+
+    #board-container video,
+    #board-container .video-js video,
+    #board-container .vjs-tech {
+      object-fit: contain !important;
+    }
   </style>
   <link href="https://res.qcloudtiw.com/board/third/videojs/1.0.0/video-js.min.css" rel="stylesheet">
   <script src="https://res.qcloudtiw.com/board/third/axios/axios.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/third/cos/5.1.0/cos.min.js"></script>
   <script src="https://res.qcloudtiw.com/board/third/videojs/1.0.0/video.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tim-js-sdk@2.27.6/tim-js.js"></script>
   <script src="https://res.qcloudtiw.com/board/2.9.13/TEduBoard.min.js"></script>
 </head>
 
 <body>
   <div id="board-container"></div>
+  <div id="board-placeholder">
+    <div>
+      <strong>白板未初始化</strong>
+      当前 URL 缺少 <code>userSig</code>，无法自动连接白板。<br>
+      请从 App Debug 日志搜索「【白板诊断】浏览器 userSig=」复制粘贴到左下角表单，再点「Init 白板 + IM」。
+    </div>
+  </div>
   <div id="debug-panel"><strong>TEduBoard</strong> loading...</div>
+  <div id="event-log"><strong>Event Log</strong></div>
+  <div id="standalone-bar">
+    <strong>浏览器独立调试（排除 WebView）</strong>
+    <label>classId（白板房间号）</label>
+    <input id="sb-classId" type="text" placeholder="1376033201">
+    <label>sdkAppId</label>
+    <input id="sb-sdkAppId" type="text" placeholder="1400090290">
+    <label>userId（txImUserId）</label>
+    <input id="sb-userId" type="text" placeholder="1201_1102868">
+    <label>userSig</label>
+    <input id="sb-userSig" type="text" placeholder="从 App 日志或接口复制">
+    <label>imGroupId（白板 IM 群，默认=classId）</label>
+    <input id="sb-imGroupId" type="text" placeholder="与 txWhiteBoardId 相同，如 1376033201">
+    <button type="button" id="sb-init-btn">Init 白板 + IM</button>
+    <button type="button" id="sb-im-btn">仅连接 IM</button>
+    <button type="button" id="sb-browse-btn">Browse 模式</button>
+    <div style="margin-top:8px;color:#64748b;">
+      静态 PPT：历史同步 historyDataSyncCompleted<br>
+      动态 PPT（按钮/动画）：依赖 IM 实时信令 im.addSyncData（App 发 onlineUserOnly，无离线补发）<br>
+      教师点击后 Event Log 应持续出现 im.addSyncData；若无则 IM 未进白板群或 userId 与 App 冲突
+    </div>
+    <div id="sb-im-stats" style="margin-top:6px;color:#2563eb;font-weight:600;">IM: 未连接</div>
+  </div>
 
   <script>
     (function () {
@@ -71,6 +212,9 @@
       // =========================================================================
       // 1. 常量
       // =========================================================================
+      /** 本地浏览器调试打开；App 内 loadHtmlString 请保持 false */
+      var STANDALONE_BROWSER_DEBUG_ENABLED = true;
+
       var DEFAULT_FLUTTER_CHANNEL = 'FlutterWhiteboardChannel';
       var DEFAULT_JS_BRIDGE = 'WhiteboardWebBridge';
       var BOARD_CONTAINER_ID = 'board-container';
@@ -179,7 +323,8 @@
         TEB_TEXT_COMPONENT_STATUS_CHANGE: 'textComponentStatusChanged',
         TEB_TEXTCOMPONENTSTATUSCHANGED: 'textComponentStatusChanged',
         TEB_TEXT_ELEMENT_WARNING: 'textWarn',
-        TEB_TEXTWARN: 'textWarn'
+        TEB_TEXTWARN: 'textWarn',
+        TEB_REPORT_LOG: 'reportLog'
       };
 
       var EVENT_PAYLOAD_MAPPERS = {
@@ -345,6 +490,7 @@
       var bridgeConfig = resolveBridgeConfig();
       var board = null;
       var boardReady = false;
+      var boardHistoryReady = false;
       var currentDrawMode = 'pen';
       var currentToolName = 'pen';
       var continuousStrokeEnabled = true;
@@ -353,8 +499,14 @@
       var currentInitOptions = null;
       var syncChannel = null;
       var syncChannelName = '';
+      var standaloneBootstrapped = false;
+      var standaloneCleanupInstalled = false;
       /** 当前正在播放的 H5PPT 媒体 ID */
       var playingH5PptMediaId = null;
+      /** 动态 PPT iframe 加载诊断。SDK 2.9.13 会内部 refresh 3 次后报 TIMEOUT。 */
+      var h5PptLoading = false;
+      var h5PptLoadingFileId = null;
+      var h5PptInternalRefreshCount = 0;
 
       // =========================================================================
       // 3. 工具函数
@@ -362,11 +514,17 @@
       function resolveBridgeConfig() {
         var search = new URLSearchParams(window.location.search);
         var runtime = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
-        var debug = search.get('debug') === '1' || !!runtime.debug;
+        var standalone = STANDALONE_BROWSER_DEBUG_ENABLED &&
+          search.get('standalone') !== '0' && runtime.standalone !== false;
+        var debug = STANDALONE_BROWSER_DEBUG_ENABLED &&
+          (standalone || search.get('debug') === '1' || !!runtime.debug);
         return {
           flutterChannel: search.get('flutterChannel') || runtime.flutterChannel || DEFAULT_FLUTTER_CHANNEL,
           jsBridge: search.get('jsBridge') || runtime.jsBridge || DEFAULT_JS_BRIDGE,
-          debug: debug
+          debug: debug,
+          standalone: standalone,
+          // standalone 默认开启 IM，与 Flutter V2TIM 白板群同步；?imSync=0 可关
+          imSync: standalone && search.get('imSync') !== '0' && runtime.imSync !== false
         };
       }
 
@@ -374,6 +532,7 @@
         if (!options) return null;
         return {
           classId: options.classId,
+          imGroupId: options.imGroupId || options.classId,
           sdkAppId: options.sdkAppId,
           userId: options.userId,
           userSigPresent: !!options.userSig
@@ -397,6 +556,691 @@
         var panel = document.getElementById(DEBUG_PANEL_ID);
         if (!panel) return;
         panel.innerHTML = '<strong>' + title + '</strong>' + stringifyValue(details);
+      }
+
+      var standaloneEventLog = [];
+      var standaloneTim = null;
+      var standaloneImUserId = '';
+      var standaloneImJoined = false;
+      var standaloneImReady = false;
+      var standaloneImStarting = false;
+      var standaloneImGroupId = '';
+      var standaloneImRecvCount = 0;
+      var standaloneImConnectionKey = '';
+      var standaloneImConnectPromise = null;
+      var standaloneImGeneration = 0;
+      var standaloneImHandlers = [];
+      var standaloneSeenMessageIds = {};
+      var standaloneSeenMessageIdQueue = [];
+      var standaloneSyncQueue = [];
+      var STANDALONE_SYNC_QUEUE_MAX = 200;
+      var STANDALONE_MESSAGE_ID_CACHE_MAX = 500;
+      var STANDALONE_IM_READY_TIMEOUT_MS = 15000;
+
+      function updateStandaloneImStats(text) {
+        var el = document.getElementById('sb-im-stats');
+        if (el) el.textContent = text;
+      }
+
+      function extractSyncAction(data) {
+        var payload = data;
+        if (typeof payload === 'string') {
+          try { payload = JSON.parse(payload); } catch (e) { return null; }
+        }
+        if (!payload || typeof payload !== 'object') return null;
+        if (payload.action != null) return payload.action;
+        if (payload.Action != null) return payload.Action;
+        if (Array.isArray(payload) && payload.length) return payload[0];
+        return null;
+      }
+
+      function enqueueStandaloneSyncData(data, source) {
+        if (standaloneSyncQueue.length >= STANDALONE_SYNC_QUEUE_MAX) {
+          standaloneSyncQueue.shift();
+        }
+        standaloneSyncQueue.push({ data: data, source: source || 'unknown' });
+      }
+
+      function flushStandaloneSyncQueue(reason) {
+        if (!board || !boardReady || !boardHistoryReady || h5PptLoading || !standaloneSyncQueue.length) return 0;
+        var pending = standaloneSyncQueue.slice();
+        standaloneSyncQueue.length = 0;
+        var applied = 0;
+        var deferred = 0;
+        pending.forEach(function (item) {
+          try {
+            var result = applySyncData(item.data, { skipQueue: true });
+            if (result && result.success) {
+              applied += 1;
+            } else if (result && (
+              result.reason === 'board_not_ready' ||
+              result.reason === 'history_not_ready' ||
+              result.reason === 'h5ppt_loading'
+            )) {
+              enqueueStandaloneSyncData(item.data, item.source);
+              deferred += 1;
+            }
+          } catch (e) {
+            appendStandaloneEvent('im.queue.error', {
+              reason: reason,
+              source: item.source,
+              message: e && e.message
+            });
+          }
+        });
+        if (applied > 0 || deferred > 0) {
+          appendStandaloneEvent('im.queue.flush', {
+            reason: reason,
+            applied: applied,
+            deferred: deferred,
+            dropped: pending.length - applied - deferred
+          });
+        }
+        return applied;
+      }
+
+      function readStandaloneImGroupId(options) {
+        var search = new URLSearchParams(window.location.search);
+        var input = document.getElementById('sb-imGroupId');
+        return (input && input.value.trim()) ||
+          search.get('imGroupId') ||
+          (options && options.imGroupId) ||
+          (options && options.classId ? String(options.classId) : '');
+      }
+
+      function standaloneImKey(options) {
+        return [
+          options && options.sdkAppId,
+          options && options.userId,
+          readStandaloneImGroupId(options),
+          options && options.userSig
+        ].join('|');
+      }
+
+      function imErrorDetails(error) {
+        if (!error) return { message: 'unknown IM error' };
+        return {
+          code: error.code != null ? error.code : null,
+          message: error.message || error.desc || String(error)
+        };
+      }
+
+      function isAlreadyImGroupMember(value) {
+        if (!value) return false;
+        var data = value.data || {};
+        var status = data.status != null ? data.status : value.status;
+        if (TIM.TYPES && status === TIM.TYPES.JOIN_STATUS_ALREADY_IN_GROUP) return true;
+
+        var code = value.code != null ? value.code : data.code;
+        if (Number(code) === 10013) return true;
+
+        var message = String(value.message || value.desc || data.message || data.errorInfo || value).toLowerCase();
+        return message.indexOf('already group member') >= 0 ||
+          message.indexOf('already in the group') >= 0 ||
+          message.indexOf('already a group member') >= 0 ||
+          message.indexOf('已经是群成员') >= 0 ||
+          message.indexOf('已在群') >= 0;
+      }
+
+      function addStandaloneTimHandler(tim, eventKey, handler) {
+        var eventName = window.TIM && TIM.EVENT && TIM.EVENT[eventKey];
+        if (!eventName || !tim || typeof tim.on !== 'function') return;
+        tim.on(eventName, handler);
+        standaloneImHandlers.push({ tim: tim, eventName: eventName, handler: handler });
+      }
+
+      function removeStandaloneTimHandlers() {
+        standaloneImHandlers.forEach(function (item) {
+          if (item.tim && typeof item.tim.off === 'function') {
+            try { item.tim.off(item.eventName, item.handler); } catch (e) { }
+          }
+        });
+        standaloneImHandlers = [];
+      }
+
+      function disconnectStandaloneIm(reason) {
+        standaloneImGeneration += 1;
+        var tim = standaloneTim;
+        removeStandaloneTimHandlers();
+        standaloneTim = null;
+        standaloneImJoined = false;
+        standaloneImReady = false;
+        standaloneImStarting = false;
+        standaloneImConnectionKey = '';
+        standaloneImConnectPromise = null;
+        standaloneImUserId = '';
+        standaloneImGroupId = '';
+        standaloneSeenMessageIds = {};
+        standaloneSeenMessageIdQueue = [];
+
+        if (!tim) return Promise.resolve();
+        appendStandaloneEvent('im.disconnect', { reason: reason || 'reset' });
+
+        var logoutPromise = Promise.resolve();
+        if (typeof tim.logout === 'function') {
+          try {
+            logoutPromise = Promise.resolve(tim.logout()).catch(function () { });
+          } catch (e) { }
+        }
+        return logoutPromise.then(function () {
+          if (typeof tim.destroy === 'function') {
+            try { return Promise.resolve(tim.destroy()).catch(function () { }); } catch (e) { }
+          }
+        });
+      }
+
+      function assertStandaloneImGeneration(generation) {
+        if (generation !== standaloneImGeneration) {
+          var error = new Error('stale IM connection');
+          error.stale = true;
+          throw error;
+        }
+      }
+
+      function initStandaloneIm(options) {
+        if (!bridgeConfig.imSync) return Promise.resolve({ success: true, skipped: true });
+        if (!options || !options.sdkAppId || !options.userId || !options.userSig) {
+          appendStandaloneEvent('im.skip', { reason: 'missing sdkAppId/userId/userSig' });
+          return Promise.reject(new Error('IM 缺少 sdkAppId、userId 或 userSig'));
+        }
+        if (!window.TIM) {
+          appendStandaloneEvent('im.error', { reason: 'TIM SDK 未加载' });
+          return Promise.reject(new Error('TIM SDK 未加载'));
+        }
+        var groupId = readStandaloneImGroupId(options);
+        if (!groupId) {
+          return Promise.reject(new Error('IM 缺少 imGroupId'));
+        }
+        var connectionKey = standaloneImKey(options);
+        if (standaloneImJoined && standaloneImReady && standaloneImConnectionKey === connectionKey) {
+          return Promise.resolve({ success: true, reused: true, groupId: groupId });
+        }
+        if (standaloneImStarting && standaloneImConnectPromise && standaloneImConnectionKey === connectionKey) {
+          return standaloneImConnectPromise;
+        }
+
+        var cleanupPromise = disconnectStandaloneIm('switch_or_reconnect');
+        standaloneImStarting = true;
+        standaloneImConnectionKey = connectionKey;
+        updateStandaloneImStats('IM: 登录中… groupId=' + groupId);
+
+        var connectionPromise = cleanupPromise.then(function () {
+          if (standaloneImConnectionKey !== connectionKey) {
+            var staleError = new Error('stale IM connection');
+            staleError.stale = true;
+            throw staleError;
+          }
+          var generation = standaloneImGeneration;
+          var tim = TIM.create({ SDKAppID: Number(options.sdkAppId) });
+          standaloneTim = tim;
+          standaloneImUserId = String(options.userId);
+          standaloneImGroupId = String(groupId);
+          standaloneImRecvCount = 0;
+          if (typeof tim.setLogLevel === 'function') tim.setLogLevel(1);
+
+          var readyResolve;
+          var readyReject;
+          var readyTimer;
+          var readyPromise = new Promise(function (resolve, reject) {
+            readyResolve = resolve;
+            readyReject = reject;
+            readyTimer = setTimeout(function () {
+              reject(new Error('等待 TIM SDK_READY 超时'));
+            }, STANDALONE_IM_READY_TIMEOUT_MS);
+          });
+
+          addStandaloneTimHandler(tim, 'MESSAGE_RECEIVED', onStandaloneImMessage);
+          addStandaloneTimHandler(tim, 'SDK_READY', function () {
+            if (generation !== standaloneImGeneration) return;
+            standaloneImReady = true;
+            clearTimeout(readyTimer);
+            readyResolve();
+            appendStandaloneEvent('im.ready', { userId: standaloneImUserId });
+          });
+          addStandaloneTimHandler(tim, 'SDK_NOT_READY', function (event) {
+            if (generation !== standaloneImGeneration) return;
+            standaloneImReady = false;
+            updateStandaloneImStats('IM: 暂不可用，等待网络恢复…');
+            appendStandaloneEvent('im.notReady', event && event.data);
+          });
+          addStandaloneTimHandler(tim, 'KICKED_OUT', function (event) {
+            if (generation !== standaloneImGeneration) return;
+            standaloneImReady = false;
+            standaloneImJoined = false;
+            var kicked = new Error('IM 被踢下线，请确认同账号 Web 多实例配置');
+            clearTimeout(readyTimer);
+            readyReject(kicked);
+            updateStandaloneImStats('IM: 被踢下线（同账号多端登录冲突）');
+            appendStandaloneEvent('im.kickedOut', event && event.data);
+          });
+          addStandaloneTimHandler(tim, 'NET_STATE_CHANGE', function (event) {
+            if (generation !== standaloneImGeneration) return;
+            var state = event && event.data && event.data.state;
+            appendStandaloneEvent('im.netState', { state: state });
+            if (TIM.TYPES && state === TIM.TYPES.NET_STATE_CONNECTED && standaloneImJoined) {
+              updateStandaloneImStats(
+                'IM: 已进群 ' + standaloneImGroupId + '，已收 ' + standaloneImRecvCount + ' 条动态信令'
+              );
+            } else if (TIM.TYPES && state === TIM.TYPES.NET_STATE_CONNECTING) {
+              updateStandaloneImStats('IM: 网络重连中…');
+            } else if (TIM.TYPES && state === TIM.TYPES.NET_STATE_DISCONNECTED) {
+              updateStandaloneImStats('IM: 网络已断开，SDK 将自动重连…');
+            }
+          });
+          addStandaloneTimHandler(tim, 'ERROR', function (event) {
+            if (generation !== standaloneImGeneration) return;
+            appendStandaloneEvent('im.error', event && event.data);
+          });
+
+          // SDK 文档要求先监听 SDK_READY，再 login；只有 READY 后才允许 joinGroup。
+          var loginPromise = tim.login({ userID: String(options.userId), userSig: String(options.userSig) }).then(function (response) {
+            assertStandaloneImGeneration(generation);
+            appendStandaloneEvent('im.login', {
+              userId: options.userId,
+              repeatLogin: !!(response && response.data && response.data.repeatLogin)
+            });
+            return response;
+          });
+          return Promise.all([loginPromise, readyPromise]).then(function () {
+            assertStandaloneImGeneration(generation);
+            updateStandaloneImStats('IM: 加入白板群… groupId=' + groupId);
+            return tim.joinGroup({ groupID: String(groupId) }).catch(function (error) {
+              if (!isAlreadyImGroupMember(error)) throw error;
+              appendStandaloneEvent('im.join.alreadyMember', {
+                groupId: groupId,
+                code: error && error.code != null ? error.code : null
+              });
+              return {
+                data: {
+                  status: TIM.TYPES && TIM.TYPES.JOIN_STATUS_ALREADY_IN_GROUP
+                    ? TIM.TYPES.JOIN_STATUS_ALREADY_IN_GROUP
+                    : 'already_in_group'
+                }
+              };
+            });
+          }).then(function (response) {
+            assertStandaloneImGeneration(generation);
+            var status = response && response.data && response.data.status;
+            if (TIM.TYPES && status === TIM.TYPES.JOIN_STATUS_WAIT_APPROVAL) {
+              throw new Error('加入白板群正在等待管理员审批');
+            }
+            standaloneImJoined = true;
+            appendStandaloneEvent('im.joined', {
+              groupId: groupId,
+              status: status || null,
+              ext: 'TXWhiteBoardExt',
+              onlineOnly: true
+            });
+            updateStandaloneImStats('IM: 已进群 ' + groupId + '，等待教师端动态信令…');
+            return { success: true, groupId: groupId, status: status || null };
+          });
+        }).catch(function (error) {
+          if (standaloneImConnectionKey !== connectionKey) {
+            if (error) error.stale = true;
+            throw error;
+          }
+          if (!error || !error.stale) {
+            standaloneImJoined = false;
+            standaloneImReady = false;
+            appendStandaloneEvent('im.join.error', Object.assign({ groupId: groupId }, imErrorDetails(error)));
+            updateStandaloneImStats('IM: 连接失败 ' + imErrorDetails(error).message);
+          }
+          throw error;
+        });
+
+        standaloneImConnectPromise = connectionPromise;
+        connectionPromise.then(function () {
+          if (standaloneImConnectPromise === connectionPromise) standaloneImStarting = false;
+        }, function () {
+          if (standaloneImConnectPromise === connectionPromise) standaloneImStarting = false;
+        });
+        return connectionPromise;
+      }
+
+      function normalizeImGroupId(id) {
+        if (id == null || id === '') return '';
+        var s = String(id);
+        if (s.indexOf('GROUP') === 0) return s.slice(5);
+        if (s.indexOf('group_') === 0) return s.slice(6);
+        return s;
+      }
+
+      function isSameImGroup(messageGroupId, expectedGroupId) {
+        if (!expectedGroupId) return true;
+        // 腾讯白板要求只接收当前课堂信令；无法确认群号时宁可丢弃，避免多课堂串板。
+        if (!messageGroupId) return false;
+        return normalizeImGroupId(messageGroupId) === normalizeImGroupId(expectedGroupId);
+      }
+
+      /** 新版 TIM 使用 message.payload，旧版白板示例使用 getElements()；两者只取其一，避免重复注入。 */
+      function extractWhiteboardCustomPayloads(message) {
+        var payloads = [];
+        if (!message) return payloads;
+
+        if (message.type === TIM.TYPES.MSG_CUSTOM && message.payload) {
+          payloads.push(message.payload);
+          return payloads;
+        }
+
+        if (typeof message.getElements === 'function') {
+          try {
+            message.getElements().forEach(function (element) {
+              if (element && element.type === TIM.TYPES.MSG_CUSTOM && element.content) {
+                payloads.push(element.content);
+              }
+            });
+          } catch (e) {
+            appendStandaloneEvent('im.elements.error', { message: e && e.message });
+          }
+        }
+
+        return payloads;
+      }
+
+      function isDuplicateStandaloneMessage(message) {
+        var messageId = message && (message.ID || message.id || message.messageID);
+        if (!messageId) return false;
+        if (standaloneSeenMessageIds[messageId]) return true;
+        standaloneSeenMessageIds[messageId] = true;
+        standaloneSeenMessageIdQueue.push(messageId);
+        if (standaloneSeenMessageIdQueue.length > STANDALONE_MESSAGE_ID_CACHE_MAX) {
+          delete standaloneSeenMessageIds[standaloneSeenMessageIdQueue.shift()];
+        }
+        return false;
+      }
+
+      function handleStandaloneWhiteboardPayload(payload, message) {
+        if (!payload || payload.extension !== 'TXWhiteBoardExt') return;
+        var data = payload.data;
+        if (!data) return;
+
+        standaloneImRecvCount += 1;
+        updateStandaloneImStats(
+          'IM: 已收 ' + standaloneImRecvCount + ' 条动态信令（group=' + standaloneImGroupId + '）'
+        );
+        try {
+          var action = extractSyncAction(data);
+          var result = applySyncData(data);
+          appendStandaloneEvent('im.addSyncData', {
+            from: message && message.from,
+            action: action,
+            queued: !!(result && result.queued),
+            len: typeof data === 'string' ? data.length : JSON.stringify(data).length
+          });
+        } catch (e) {
+          appendStandaloneEvent('im.addSyncData.error', { message: e && e.message });
+        }
+      }
+
+      function onStandaloneImMessage(event) {
+        if (!event || !event.data) return;
+        var messages = event.data;
+        if (!messages.forEach) messages = [messages];
+        messages.forEach(function (message) {
+          if (!message || message.conversationType !== TIM.TYPES.CONV_GROUP) return;
+          var msgGroupId = message.to || message.groupID || message.conversationID || '';
+          if (!isSameImGroup(msgGroupId, standaloneImGroupId)) {
+            return;
+          }
+          if (message.from && message.from === standaloneImUserId) return;
+          if (isDuplicateStandaloneMessage(message)) return;
+
+          var payloads = extractWhiteboardCustomPayloads(message);
+          if (!payloads.length) {
+            if (bridgeConfig.debug && message.type === TIM.TYPES.MSG_CUSTOM) {
+              appendStandaloneEvent('im.custom.skip', {
+                from: message.from,
+                extension: message.payload && message.payload.extension
+              });
+            }
+            return;
+          }
+          payloads.forEach(function (payload) {
+            handleStandaloneWhiteboardPayload(payload, message);
+          });
+        });
+      }
+
+      function sendStandaloneImSyncData(payload) {
+        if (!standaloneTim || !standaloneImReady || !standaloneImJoined || !currentInitOptions) return;
+        var groupId = readStandaloneImGroupId(currentInitOptions);
+        var dataStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        var message = standaloneTim.createCustomMessage({
+          to: groupId,
+          conversationType: TIM.TYPES.CONV_GROUP,
+          priority: TIM.TYPES.MSG_PRIORITY_HIGH,
+          payload: { data: dataStr, description: '', extension: 'TXWhiteBoardExt' }
+        });
+        standaloneTim.sendMessage(message, { onlineUserOnly: true }).catch(function (err) {
+          appendStandaloneEvent('im.send.error', { message: err && err.message });
+        });
+      }
+
+      function updateBoardPlaceholder(html, hidden) {
+        var el = document.getElementById('board-placeholder');
+        if (!el) return;
+        if (hidden) {
+          el.classList.add('is-hidden');
+          return;
+        }
+        el.classList.remove('is-hidden');
+        if (html != null) el.innerHTML = html;
+      }
+
+      function appendStandaloneEvent(type, payload) {
+        if (!bridgeConfig.standalone && !bridgeConfig.debug) return;
+        // SDK 遥测事件量很大，会把真正的 H5PPT/IM 诊断迅速挤出面板。
+        if (type === 'reportLog') return;
+        var line = '[' + new Date().toLocaleTimeString() + '] ' + type;
+        if (payload != null) {
+          try { line += ' ' + JSON.stringify(payload); } catch (e) { line += ' ' + String(payload); }
+        }
+        standaloneEventLog.unshift(line);
+        if (standaloneEventLog.length > 80) standaloneEventLog.length = 80;
+        var panel = document.getElementById('event-log');
+        if (panel) {
+          panel.innerHTML = '<strong>Event Log（浏览器）</strong>' + standaloneEventLog.join('\n');
+        }
+        var watch = ['h5PptStatusChanged', 'boardRefresh', 'historyDataSyncCompleted', 'boardReady', 'boardOffline', 'boardError', 'h5Ppt.url'];
+        if (watch.indexOf(type) >= 0 || (type && type.toLowerCase().indexOf('ppt') >= 0)) {
+          console.log('[白板诊断]', type, payload);
+        }
+        if (type === 'boardReady' || type === 'historyDataSyncCompleted') {
+          updateBoardPlaceholder(null, true);
+        }
+        // 不在 historyDataSyncCompleted 时 flush 信令；等 H5PPT LOADED 后再注入，避免 iframe 握手被打断。
+        if (type === 'h5PptStatusChanged' && payload && payload.status != null) {
+          var st = payload.status;
+          var stStr = String(st);
+          if (stStr.indexOf('LOADED') >= 0 || st === 2) {
+            updateBoardPlaceholder(null, true);
+          } else if (stStr.indexOf('TIMEOUT') >= 0 || st === 4) {
+            updateBoardPlaceholder(
+              '<div><strong>PPT 加载超时</strong>请确认教师端已在该房间打开 PPT；Event Log 见 <code>h5PptStatusChanged</code></div>'
+            );
+          }
+        }
+        if (type === 'boardError' || type === 'standalone.init.error') {
+          updateBoardPlaceholder(
+            '<div><strong>白板错误</strong>' + (payload && payload.message ? payload.message : JSON.stringify(payload || {})) + '</div>'
+          );
+        }
+      }
+
+      function installStandaloneFlutterChannel() {
+        var channelName = bridgeConfig.flutterChannel;
+        window[channelName] = {
+          postMessage: function (message) {
+            var parsed = message;
+            if (typeof message === 'string') {
+              try { parsed = JSON.parse(message); } catch (e) { parsed = { raw: message }; }
+            }
+            appendStandaloneEvent(parsed && parsed.type, parsed && parsed.payload);
+            if (parsed && parsed.type === 'boardReady' && bridgeConfig.imSync) {
+              initStandaloneIm(readStandaloneInitOptions());
+            }
+          }
+        };
+      }
+
+      function readStandaloneInitOptions() {
+        var search = new URLSearchParams(window.location.search);
+        var runtime = window.__WHITEBOARD_INIT__ || {};
+        function pick(key, inputId) {
+          var fromUrl = search.get(key);
+          if (fromUrl) return fromUrl;
+          if (runtime[key] != null) return String(runtime[key]);
+          var input = document.getElementById(inputId);
+          return input && input.value ? input.value.trim() : '';
+        }
+        return {
+          classId: pick('classId', 'sb-classId'),
+          imGroupId: pick('imGroupId', 'sb-imGroupId'),
+          sdkAppId: pick('sdkAppId', 'sb-sdkAppId'),
+          userId: pick('userId', 'sb-userId'),
+          userSig: pick('userSig', 'sb-userSig'),
+          ratio: search.get('ratio') || runtime.ratio || '4:3',
+          pptTurnPageEnabled: true,
+          continuousStrokeEnabled: true
+        };
+      }
+
+      function mountStandaloneUi() {
+        var bar = document.getElementById('standalone-bar');
+        var log = document.getElementById('event-log');
+        if (bar) bar.classList.add('is-visible');
+        if (log) log.classList.add('is-visible');
+
+        var search = new URLSearchParams(window.location.search);
+        ['classId', 'imGroupId', 'sdkAppId', 'userId', 'userSig'].forEach(function (key) {
+          var val = search.get(key);
+          var input = document.getElementById('sb-' + key);
+          if (input && val) input.value = val;
+        });
+        var classIdVal = search.get('classId') || (document.getElementById('sb-classId') || {}).value;
+        var imGroupInput = document.getElementById('sb-imGroupId');
+        if (imGroupInput && classIdVal && !imGroupInput.value.trim()) {
+          imGroupInput.value = classIdVal.trim();
+        }
+
+        var initBtn = document.getElementById('sb-init-btn');
+        if (initBtn) {
+          initBtn.addEventListener('click', function () {
+            var options = readStandaloneInitOptions();
+            if (!options.userSig) {
+              appendStandaloneEvent('standalone.init.error', { message: '缺少 userSig' });
+              updateBoardPlaceholder(
+                '<div><strong>无法 Init</strong>请先填写 <code>userSig</code>（App 日志「【白板诊断】浏览器 userSig=」）</div>'
+              );
+              return;
+            }
+            startStandaloneBoard(options, 'standalone.init');
+          });
+        }
+        var imBtn = document.getElementById('sb-im-btn');
+        if (imBtn) {
+          imBtn.addEventListener('click', function () {
+            var options = readStandaloneInitOptions();
+            disconnectStandaloneIm('manual_reconnect').then(function () {
+              return initStandaloneIm(options);
+            }).catch(function () { });
+          });
+        }
+        var browseBtn = document.getElementById('sb-browse-btn');
+        if (browseBtn) {
+          browseBtn.addEventListener('click', function () {
+            try {
+              window[bridgeConfig.jsBridge].setDrawMode('browse');
+              appendStandaloneEvent('standalone.browse', { ok: true });
+            } catch (e) {
+              appendStandaloneEvent('standalone.browse.error', { message: e && e.message });
+            }
+          });
+        }
+      }
+
+      function startStandaloneBoard(options, eventName) {
+        updateBoardPlaceholder(
+          bridgeConfig.imSync
+            ? '<div><strong>正在连接实时消息…</strong>加入白板群后将自动初始化白板</div>'
+            : '<div><strong>正在连接白板…</strong>实时 IM 同步已关闭</div>'
+        );
+        // 教师端白板信令是 onlineUserOnly；必须先进入 IM 群，再初始化白板，避免启动窗口丢消息。
+        return initStandaloneIm(options).then(function () {
+          updateBoardPlaceholder('<div><strong>正在连接白板…</strong>IM 已就绪，请稍候</div>');
+          var result = window[bridgeConfig.jsBridge].init(options);
+          appendStandaloneEvent(eventName || 'standalone.init', sanitizeOptionsForLog(options));
+          return result;
+        }).catch(function (error) {
+          if (error && error.stale) return;
+          appendStandaloneEvent('standalone.init.error', imErrorDetails(error));
+          updateBoardPlaceholder(
+            '<div><strong>连接失败</strong>' + (error && error.message ? error.message : String(error)) + '</div>'
+          );
+        });
+      }
+
+      function tryAutoInitStandalone() {
+        var options = readStandaloneInitOptions();
+        if (!options.classId || !options.sdkAppId || !options.userId || !options.userSig) {
+          var missing = [];
+          if (!options.classId) missing.push('classId');
+          if (!options.sdkAppId) missing.push('sdkAppId');
+          if (!options.userId) missing.push('userId');
+          if (!options.userSig) missing.push('userSig');
+          appendStandaloneEvent('standalone.waitInit', {
+            missing: missing,
+            hint: '填写参数后点 Init，或 URL 带齐 classId/sdkAppId/userId/userSig'
+          });
+          updateBoardPlaceholder(
+            '<div><strong>白板未初始化</strong>缺少参数：<code>' + missing.join('</code>、<code>') +
+            '</code><br>请从左下角粘贴 <code>userSig</code>（App 日志「【白板诊断】浏览器 userSig=」）后点「Init 白板 + IM」。<br>' +
+            'PPT 需教师端已在同房间打开，Init 成功后靠历史同步或 IM 信令显示。</div>'
+          );
+          return;
+        }
+        startStandaloneBoard(options, 'standalone.autoInit');
+      }
+
+      function bootstrapStandalone() {
+        if (standaloneBootstrapped) return;
+        standaloneBootstrapped = true;
+        mountStandaloneUi();
+        installStandaloneFlutterChannel();
+        window[bridgeConfig.jsBridge] = bridgeApi;
+        var debugPanel = document.getElementById(DEBUG_PANEL_ID);
+        if (debugPanel) debugPanel.classList.add('is-visible');
+        postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig, standalone: true });
+        updateDebugPanel('Standalone Browser Mode', {
+          version: bridgeApi.version,
+          hint: '观察 h5Ppt.diagnostic 与 im.queue.flush，实时信令会等历史数据和 H5PPT 加载完成'
+        });
+        if (!standaloneCleanupInstalled) {
+          standaloneCleanupInstalled = true;
+          window.addEventListener('pagehide', function () {
+            if (standaloneTim) disconnectStandaloneIm('pagehide');
+          });
+        }
+        tryAutoInitStandalone();
+      }
+
+      function enableStandaloneFallback() {
+        if (!STANDALONE_BROWSER_DEBUG_ENABLED) {
+          console.warn('[TEduBoardBridge] Flutter channel wait timeout (standalone fallback disabled for App)');
+          return;
+        }
+        var search = new URLSearchParams(window.location.search);
+        var runtime = window.__WHITEBOARD_BRIDGE_CONFIG__ || {};
+        bridgeConfig = Object.assign({}, bridgeConfig, {
+          standalone: true,
+          debug: true,
+          imSync: search.get('imSync') !== '0' && runtime.imSync !== false
+        });
+        appendStandaloneEvent('standalone.detected', {
+          reason: 'Flutter channel unavailable',
+          imSync: bridgeConfig.imSync
+        });
+        bootstrapStandalone();
       }
 
       function mapEventPayload(eventKey, args) {
@@ -440,6 +1284,193 @@
           }
         }
         return null;
+      }
+
+      function getBoardFileInfo(fileId) {
+        if (!board || typeof board.getFileInfo !== 'function') return null;
+        if (fileId) {
+          try {
+            var requested = board.getFileInfo(fileId);
+            if (requested) return requested;
+          } catch (e) {
+            console.warn('[TEduBoardBridge] getFileInfo(fileId) failed', e);
+          }
+        }
+        try {
+          return board.getFileInfo() || null;
+        } catch (e) {
+          console.warn('[TEduBoardBridge] getFileInfo failed', e);
+          return null;
+        }
+      }
+
+      /** URL 查询参数可能带 COS 签名，只记录定位资源链路所需的非敏感部分。 */
+      function summarizeResourceUrl(value) {
+        if (!value || typeof value !== 'string') return null;
+        try {
+          var parsed = new URL(value, window.location.href);
+          return {
+            protocol: parsed.protocol,
+            host: parsed.host,
+            pathname: parsed.pathname,
+            hasQuery: !!parsed.search,
+            queryKeys: Array.from(parsed.searchParams.keys()).slice(0, 12)
+          };
+        } catch (e) {
+          return { value: String(value).split('?')[0], invalid: true };
+        }
+      }
+
+      function h5PptStatusName(status) {
+        var Status = TEduBoard && TEduBoard.TEduBoardH5PPTStatus;
+        if (!Status) return String(status);
+        var keys = Object.keys(Status);
+        for (var i = 0; i < keys.length; i += 1) {
+          if (Status[keys[i]] === status) return keys[i].replace('TEDU_BOARD_H5_PPT_STATUS_', '');
+        }
+        return String(status);
+      }
+
+      function normalizeH5PptStatusEvent(eventKey, args) {
+        var first = args[0];
+        var second = args[1];
+        // 2.9.13: (status, { fid, ... })；兼容旧接口：(fileId, status, message)。
+        if (second && typeof second === 'object') {
+          return {
+            status: first,
+            fileId: second.fid || second.fileId || null,
+            data: second
+          };
+        }
+        if (eventKey === 'TEB_H5PPTSTATUSCHANGED' || typeof first === 'string') {
+          return { status: second, fileId: first || null, data: args[2] || null };
+        }
+        return { status: first, fileId: null, data: second || null };
+      }
+
+      function pickH5PptUrlFromFileInfo(fileInfo) {
+        if (!fileInfo || typeof fileInfo !== 'object') return null;
+        var candidates = [
+          fileInfo.downloadURL,
+          fileInfo.downloadUrl,
+          fileInfo.url,
+          fileInfo.src,
+          fileInfo.h5Url,
+          fileInfo.h5URL,
+          fileInfo.transcodeUrl,
+          fileInfo.transcodeURL,
+          fileInfo.fileUrl,
+          fileInfo.fileURL
+        ];
+        for (var i = 0; i < candidates.length; i += 1) {
+          if (typeof candidates[i] === 'string' && candidates[i]) return candidates[i];
+        }
+        return null;
+      }
+
+      function collectH5PptIframeSrcRaw() {
+        var container = document.getElementById(BOARD_CONTAINER_ID);
+        if (!container) return [];
+        return Array.prototype.slice.call(container.querySelectorAll('iframe'), 0, 6)
+          .map(function (iframe) { return iframe.getAttribute('src') || ''; })
+          .filter(Boolean);
+      }
+
+      function logH5PptUrlDiagnostics(context) {
+        var fileId = context.fileId || h5PptLoadingFileId || tryBoardGet(['getCurrentFile']);
+        var fileInfo = getBoardFileInfo(fileId);
+        var downloadUrl = pickH5PptUrlFromFileInfo(fileInfo);
+        var iframeSrcs = collectH5PptIframeSrcRaw();
+        var payload = {
+          context: context.context || 'status',
+          status: context.status,
+          statusName: context.statusName || null,
+          fileId: fileId || null,
+          pptDownloadUrl: downloadUrl || null,
+          iframeSrcs: iframeSrcs,
+          pageProtocol: window.location.protocol,
+          pageOrigin: window.location.origin || null
+        };
+        if (fileInfo && !downloadUrl) {
+          payload.fileInfoKeys = Object.keys(fileInfo);
+        }
+        appendStandaloneEvent('h5Ppt.url', payload);
+        console.log('[白板诊断] h5Ppt.url', payload);
+        if (downloadUrl) {
+          console.log('[白板诊断] h5Ppt.url.downloadUrl =', downloadUrl);
+        }
+        iframeSrcs.forEach(function (src, index) {
+          console.log('[白板诊断] h5Ppt.url.iframe[' + index + '] =', src);
+        });
+        return payload;
+      }
+
+      function handleH5PptStatusDiagnostics(eventKey, args) {
+        var event = normalizeH5PptStatusEvent(eventKey, args);
+        var Status = TEduBoard && TEduBoard.TEduBoardH5PPTStatus;
+        var loadingStatus = Status && Status.TEDU_BOARD_H5_PPT_STATUS_LOADING;
+        var loadedStatus = Status && Status.TEDU_BOARD_H5_PPT_STATUS_LOADED;
+        var fileId = event.fileId || tryBoardGet(['getCurrentFile']);
+
+        if (event.status === loadingStatus || event.status === 1) {
+          if (!h5PptLoading || (fileId && fileId !== h5PptLoadingFileId)) {
+            h5PptInternalRefreshCount = 0;
+          }
+          h5PptLoading = true;
+          h5PptLoadingFileId = fileId || h5PptLoadingFileId;
+        }
+
+        var fileInfo = getBoardFileInfo(fileId);
+        var downloadUrl = pickH5PptUrlFromFileInfo(fileInfo);
+        var iframeUrls = collectH5PptIframeSrcRaw().map(function (src) {
+          return summarizeResourceUrl(src);
+        }).filter(Boolean);
+        appendStandaloneEvent('h5Ppt.diagnostic', {
+          status: event.status,
+          statusName: h5PptStatusName(event.status),
+          fileId: fileId || null,
+          internalRefreshCount: h5PptInternalRefreshCount,
+          downloadUrl: summarizeResourceUrl(downloadUrl),
+          iframeUrls: iframeUrls,
+          pageProtocol: window.location.protocol
+        });
+        logH5PptUrlDiagnostics({
+          context: 'h5PptStatusChanged',
+          status: event.status,
+          statusName: h5PptStatusName(event.status),
+          fileId: fileId
+        });
+
+        var timeoutStatus = Status && Status.TEDU_BOARD_H5_PPT_STATUS_TIMEOUT;
+        if (event.status === loadedStatus || event.status === 2) {
+          h5PptLoading = false;
+          h5PptInternalRefreshCount = 0;
+          applyPptInteractionSettings();
+          if (boardHistoryReady) {
+            flushStandaloneSyncQueue('H5PPT_LOADED');
+          }
+        } else if (event.status !== loadingStatus && event.status !== 1) {
+          h5PptLoading = false;
+          if (boardHistoryReady &&
+            (event.status === timeoutStatus || event.status === 4)) {
+            flushStandaloneSyncQueue('H5PPT_TIMEOUT');
+          }
+        }
+      }
+
+      function handleBoardRefreshDiagnostics() {
+        if (!h5PptLoading) return;
+        h5PptInternalRefreshCount += 1;
+        logH5PptUrlDiagnostics({
+          context: 'retryRefresh',
+          statusName: 'REFRESH_' + h5PptInternalRefreshCount,
+          fileId: h5PptLoadingFileId
+        });
+        appendStandaloneEvent('h5Ppt.retryRefresh', {
+          fileId: h5PptLoadingFileId,
+          count: h5PptInternalRefreshCount,
+          reason: 'TEduBoard H5PPT iframe 未完成加载握手'
+        });
       }
 
       // =========================================================================
@@ -553,7 +1584,11 @@
       // 5. Flutter 通信
       // =========================================================================
       function postToFlutter(type, payload) {
-        // syncData：上报 Flutter，由 ImManager(V2TIM) 发到白板群（勿在 H5 再登 tim-js-sdk）
+        // standalone + IM：浏览器直连 TIM，与 App 相同 TXWhiteBoardExt 信令
+        if (type === 'syncData' && bridgeConfig.standalone && bridgeConfig.imSync && standaloneTim && standaloneImJoined) {
+          sendStandaloneImSyncData(payload);
+        }
+        // syncData：App WebView 由 Flutter V2TIM 转发（standalone 未开 IM 时不重复发）
         if (type === 'syncData' && bridgeConfig.debug) {
           updateDebugPanel('TEB_SYNCDATA', { payloadType: typeof payload });
         }
@@ -586,11 +1621,30 @@
       }
 
       /** Flutter 高频同步入口不发送 methodResult，避免每个信令再跨一次 JS -> Flutter。 */
-      function applySyncData(data) {
-        if (!board) throw new Error('TEduBoard has not been initialized');
-        if (!boardReady) {
-          return { success: false, reason: 'board_not_ready' };
+      function applySyncData(data, options) {
+        options = options || {};
+        if (!board) {
+          if (!options.skipQueue) {
+            enqueueStandaloneSyncData(data, options.source || 'applySyncData');
+            return { success: false, reason: 'board_not_initialized', queued: true };
+          }
+          throw new Error('TEduBoard has not been initialized');
         }
+        if (!boardReady || !boardHistoryReady) {
+          if (!options.skipQueue) {
+            enqueueStandaloneSyncData(data, options.source || 'applySyncData');
+            return {
+              success: false,
+              reason: !boardReady ? 'board_not_ready' : 'history_not_ready',
+              queued: true
+            };
+          }
+          return {
+            success: false,
+            reason: !boardReady ? 'board_not_ready' : 'history_not_ready'
+          };
+        }
+        // PPT LOADING 期间仍允许 IM 增量同步（App 依赖）；批量 flush 仍等 LOADED，避免信令风暴
 
         var syncPayload = data;
         if (typeof syncPayload === 'string') {
@@ -617,7 +1671,7 @@
         syncChannel = new BroadcastChannel(syncChannelName);
         syncChannel.onmessage = function (event) {
           if (!board || !event.data || event.data.type !== 'syncData') return;
-          try { board.addSyncData(event.data.payload); } catch (e) { }
+          try { applySyncData(event.data.payload, { source: 'broadcastChannel' }); } catch (e) { }
         };
       }
 
@@ -634,6 +1688,253 @@
       // pptTurnPageEnabled：控制 h5PPT/imgPPT 点击（含 PPT 内交互）。
       // 学生禁止翻页请用 SDK enablePermissionChecker(Board::Switch::Page)，勿置 false。
       var pptTurnPageEnabled = true;
+      var defaultBoardRatio = '4:3';
+      var VIDEO_FILE_TYPE = 4;
+      var VIDEO_STATUS_LOADED = 3;
+      var VIDEO_STATUS_ENDED = 8;
+      var lastVideoNearEndLogAt = 0;
+      var videoEndedPollTimer = null;
+      var pendingVideoDisplayMode = null;
+
+      function applyVideoObjectFitToDom() {
+        var root = document.getElementById(BOARD_CONTAINER_ID);
+        if (!root) return;
+        var videos = root.querySelectorAll('video, .vjs-tech');
+        for (var i = 0; i < videos.length; i++) {
+          videos[i].style.objectFit = 'contain';
+        }
+        bindAllVideoPlaybackDebug();
+      }
+
+      function getBoardVideoElements() {
+        var root = document.getElementById(BOARD_CONTAINER_ID);
+        if (!root) return [];
+        return Array.prototype.slice.call(root.querySelectorAll('video, .vjs-tech'));
+      }
+
+      function snapshotVideoElement(video, extra) {
+        extra = extra || {};
+        var duration = video ? video.duration : null;
+        var currentTime = video ? video.currentTime : null;
+        var remain = (isFinite(duration) && isFinite(currentTime)) ? (duration - currentTime) : null;
+        return {
+          source: extra.source || 'html5',
+          event: extra.event || null,
+          fileId: extra.fileId || null,
+          sdkStatus: extra.sdkStatus != null ? extra.sdkStatus : null,
+          currentTime: currentTime,
+          duration: duration,
+          remain: remain,
+          paused: !!(video && video.paused),
+          ended: !!(video && video.ended),
+          seeking: !!(video && video.seeking),
+          readyState: video ? video.readyState : null,
+          networkState: video ? video.networkState : null,
+          videoWidth: video ? video.videoWidth : null,
+          videoHeight: video ? video.videoHeight : null,
+          tick: extra.tick != null ? extra.tick : null
+        };
+      }
+
+      function formatVideoDebugLine(snap) {
+        snap = snap || {};
+        return '[TEduBoardBridge][video-debug] v2'
+          + ' source=' + snap.source
+          + ' event=' + snap.event
+          + ' fileId=' + snap.fileId
+          + ' currentTime=' + snap.currentTime
+          + ' duration=' + snap.duration
+          + ' remain=' + snap.remain
+          + ' paused=' + snap.paused
+          + ' ended=' + snap.ended
+          + ' seeking=' + snap.seeking
+          + ' readyState=' + snap.readyState
+          + ' networkState=' + snap.networkState
+          + ' videoWidth=' + snap.videoWidth
+          + ' videoHeight=' + snap.videoHeight
+          + ' sdkStatus=' + snap.sdkStatus
+          + ' sdkProgress=' + snap.sdkProgress
+          + ' sdkDuration=' + snap.sdkDuration
+          + ' tick=' + snap.tick
+          + ' visibility=' + (document.visibilityState || '');
+      }
+
+      function logVideoPlaybackDebug(snap) {
+        var line = formatVideoDebugLine(snap);
+        console.log(line);
+        snap.line = line;
+        postToFlutter('videoPlaybackDebug', snap);
+        appendStandaloneEvent('video.debug', { line: line });
+      }
+
+      function startVideoEndedPoll(video) {
+        if (!video) return;
+        if (videoEndedPollTimer) {
+          clearInterval(videoEndedPollTimer);
+          videoEndedPollTimer = null;
+        }
+        var ticks = 0;
+        videoEndedPollTimer = setInterval(function () {
+          ticks += 1;
+          logVideoPlaybackDebug(snapshotVideoElement(video, {
+            source: 'html5',
+            event: 'ended-poll',
+            tick: ticks
+          }));
+          if (ticks >= 10) {
+            clearInterval(videoEndedPollTimer);
+            videoEndedPollTimer = null;
+          }
+        }, 500);
+      }
+
+      function bindVideoPlaybackDebug(video) {
+        if (!video || video._lsVideoDebugBound) return;
+        video._lsVideoDebugBound = true;
+        ['play', 'pause', 'ended', 'seeked', 'waiting', 'stalled', 'emptied'].forEach(function (evt) {
+          video.addEventListener(evt, function () {
+            logVideoPlaybackDebug(snapshotVideoElement(video, { source: 'html5', event: evt }));
+            if (evt === 'ended' || (evt === 'seeked' && video.ended)) {
+              startVideoEndedPoll(video);
+            }
+          });
+        });
+        video.addEventListener('timeupdate', function () {
+          var duration = video.duration;
+          var currentTime = video.currentTime;
+          if (!isFinite(duration) || !isFinite(currentTime) || duration - currentTime > 3) return;
+          var now = Date.now();
+          if (now - lastVideoNearEndLogAt < 500) return;
+          lastVideoNearEndLogAt = now;
+          logVideoPlaybackDebug(snapshotVideoElement(video, {
+            source: 'html5',
+            event: 'timeupdate-near-end'
+          }));
+        });
+      }
+
+      function bindAllVideoPlaybackDebug() {
+        var videos = getBoardVideoElements();
+        for (var i = 0; i < videos.length; i++) {
+          bindVideoPlaybackDebug(videos[i]);
+        }
+      }
+
+      function logSdkVideoStatusDebug(payload) {
+        payload = payload || {};
+        var videos = getBoardVideoElements();
+        var video = videos.length ? videos[0] : null;
+        bindAllVideoPlaybackDebug();
+        var status = Number(payload.status);
+        var sdkRemain = (payload.progress != null && payload.duration != null)
+          ? (Number(payload.duration) - Number(payload.progress))
+          : null;
+        if (status === 5 && (sdkRemain == null || sdkRemain > 3)) {
+          return;
+        }
+        var snap = snapshotVideoElement(video, {
+          source: 'sdk',
+          event: 'TEB_VIDEO_STATUS',
+          fileId: payload.fileId || null,
+          sdkStatus: payload.status
+        });
+        snap.sdkProgress = payload.progress;
+        snap.sdkDuration = payload.duration;
+        logVideoPlaybackDebug(snap);
+        if (status === VIDEO_STATUS_ENDED) {
+          startVideoEndedPoll(video);
+        }
+      }
+
+      function resolveDefaultBoardRatio() {
+        if (currentInitOptions && currentInitOptions.ratio) {
+          return String(currentInitOptions.ratio);
+        }
+        return defaultBoardRatio;
+      }
+
+      function isVideoFileInfo(info) {
+        return !!(info && Number(info.fileType) === VIDEO_FILE_TYPE);
+      }
+
+      function syncVideoDisplayModeForFile(fileId) {
+        if (!board || !boardReady) return;
+        var targetId = fileId;
+        if (!targetId && typeof board.getCurrentFile === 'function') {
+          targetId = board.getCurrentFile();
+        }
+        if (!targetId) {
+          applyVideoDisplayMode(false);
+          return;
+        }
+        try {
+          var info = typeof board.getFileInfo === 'function' ? board.getFileInfo(targetId) : null;
+          applyVideoDisplayMode(isVideoFileInfo(info));
+        } catch (e) {
+          console.warn('[TEduBoardBridge] syncVideoDisplayModeForFile failed', e);
+        }
+      }
+
+      function applyVideoDisplayModeInternal(isVideo, ratioWhenNotVideo) {
+        if (!board || !boardReady) return false;
+        if (typeof board.setBoardContentFitMode === 'function') {
+          board.setBoardContentFitMode(0);
+        }
+        var restoreRatio = ratioWhenNotVideo || resolveDefaultBoardRatio();
+        var ratio = isVideo ? '16:9' : restoreRatio;
+        if (typeof board.setBoardRatio === 'function') {
+          board.setBoardRatio(ratio);
+        }
+        applyVideoObjectFitToDom();
+        if (typeof board.resize === 'function') board.resize();
+        return true;
+      }
+
+      function applyVideoDisplayMode(isVideo, ratioWhenNotVideo) {
+        pendingVideoDisplayMode = {
+          isVideo: !!isVideo,
+          defaultRatio: ratioWhenNotVideo || resolveDefaultBoardRatio()
+        };
+        var applied = applyVideoDisplayModeInternal(
+          pendingVideoDisplayMode.isVideo,
+          pendingVideoDisplayMode.defaultRatio
+        );
+        return { success: true, applied: applied, reason: applied ? null : 'board_not_ready' };
+      }
+
+      function flushPendingVideoDisplayMode() {
+        if (pendingVideoDisplayMode) {
+          applyVideoDisplayModeInternal(
+            pendingVideoDisplayMode.isVideo,
+            pendingVideoDisplayMode.defaultRatio
+          );
+          return;
+        }
+        syncVideoDisplayModeForFile(null);
+      }
+
+      function installVideoVisibilityDebug() {
+        if (window._lsVideoVisibilityDebug) return;
+        window._lsVideoVisibilityDebug = true;
+        document.addEventListener('visibilitychange', function () {
+          logVideoPlaybackDebug(snapshotVideoElement(getBoardVideoElements()[0], {
+            source: 'html5',
+            event: 'visibilitychange-' + document.visibilityState
+          }));
+        });
+        window.addEventListener('focus', function () {
+          logVideoPlaybackDebug(snapshotVideoElement(getBoardVideoElements()[0], {
+            source: 'html5',
+            event: 'window-focus'
+          }));
+        });
+        window.addEventListener('blur', function () {
+          logVideoPlaybackDebug(snapshotVideoElement(getBoardVideoElements()[0], {
+            source: 'html5',
+            event: 'window-blur'
+          }));
+        });
+      }
 
       function buildMouseTurnPageBehavior() {
         return {
@@ -655,8 +1956,19 @@
         if (!method || typeof board[method] !== 'function') {
           throw new Error('Unsupported board method: ' + method);
         }
+        if (method === 'syncAndReload') {
+          boardHistoryReady = false;
+        }
         var params = Array.isArray(args) ? args : [];
         var result = board[method].apply(board, params);
+        if (method === 'addVideoFile') {
+          applyVideoDisplayMode(true);
+        } else if (method === 'switchFile') {
+          var switchedFileId = params[0];
+          setTimeout(function () {
+            syncVideoDisplayModeForFile(switchedFileId);
+          }, 0);
+        }
         return result === undefined ? { success: true } : result;
       }
 
@@ -668,6 +1980,9 @@
 
       function applyPptInteractionSettings() {
         ensureBoardReady();
+        if (h5PptLoading) {
+          return { deferred: true, reason: 'h5ppt_loading' };
+        }
         if (typeof board.disablePointerEventResponding === 'function') {
           board.disablePointerEventResponding(false);
         }
@@ -675,11 +1990,11 @@
           board.disableDrawActionEventResponding(false);
         }
         applyDefaultMouseToolBehavior();
-        if (typeof board.enableAudioControl === 'function') {
+        if (boardHistoryReady && typeof board.enableAudioControl === 'function') {
           board.enableAudioControl(true);
         }
         // 与 Flutter 侧一致：隐藏 PPT 内置音频控制条
-        if (typeof board.setShowPPTAudioControls === 'function') {
+        if (boardHistoryReady && typeof board.setShowPPTAudioControls === 'function') {
           board.setShowPPTAudioControls(false);
         }
       }
@@ -687,6 +2002,7 @@
       // Web SDK 事件参数: (fileId, mediaId, status, currentTime)
       function handleH5PptMediaAuthority(eventKey, args) {
         if (!board || !TEduBoard || !TEduBoard.TEduBoardH5PPTMediaStatus) return;
+        if (h5PptLoading) return;
         var MediaStatus = TEduBoard.TEduBoardH5PPTMediaStatus;
         var mediaId = args[1];
         var status = args[2];
@@ -781,14 +2097,26 @@
 
       function handleBoardInitEvent() {
         boardReady = true;
+        if (bridgeConfig.standalone || bridgeConfig.debug) {
+          updateBoardPlaceholder(
+            '<div><strong>白板已连接</strong>等待历史同步 / 教师端 PPT…<br>Event Log 应出现 <code>boardReady</code>、<code>historyDataSyncCompleted</code></div>'
+          );
+        } else {
+          updateBoardPlaceholder(null, true);
+        }
         updateDebugPanel('boardReady', sanitizeOptionsForLog(currentInitOptions));
 
         var payload = {
           classId: currentInitOptions && currentInitOptions.classId,
           userId: currentInitOptions && currentInitOptions.userId,
           currentBoardId: tryBoardGet(['getCurrentBoard']),
-          currentFileId: tryBoardGet(['getCurrentFile'])
+          currentFileId: tryBoardGet(['getCurrentFile']),
+          hostOrigin: window.location.origin || null,
+          hostHref: (window.location.href || '').split('?')[0]
         };
+        if (bridgeConfig.debug) {
+          console.log('[白板诊断] hostOrigin', payload.hostOrigin, payload.hostHref);
+        }
         postToFlutter('boardReady', payload);
         applyPptInteractionSettings();
         if (currentToolName === 'mouse' || currentDrawMode === 'browse') {
@@ -800,6 +2128,7 @@
         } else {
           applyDrawMode(currentDrawMode);
         }
+        flushPendingVideoDisplayMode();
       }
 
       function bindBoardEvents() {
@@ -828,6 +2157,7 @@
             }
             if (eventKey === 'TEB_OFFLINE') {
               boardReady = false;
+              boardHistoryReady = false;
               updateDebugPanel('boardOffline', mapEventPayload(eventKey, args));
               postToFlutter('boardOffline', mapEventPayload(eventKey, args));
               return;
@@ -835,6 +2165,24 @@
             if (eventKey === 'TEB_HISTROYDATA_SYNCCOMPLETED') {
               // syncAndReload 不会重走 TEB_INIT，历史同步完成后需恢复 boardReady
               boardReady = true;
+              boardHistoryReady = true;
+              flushPendingVideoDisplayMode();
+              // PPT 交互/音频/IM 信令延后到 H5PPT LOADED，避免 LOADING 期间干扰 iframe 握手
+            }
+            if (eventKey === 'TEB_SWITCHFILE') {
+              var switchPayload = mapEventPayload(eventKey, args);
+              setTimeout(function () {
+                syncVideoDisplayModeForFile(switchPayload && switchPayload.fileId);
+              }, 0);
+            }
+            if (eventKey === 'TEB_VIDEOSTATUSCHANGED' || eventKey === 'TEB_VIDEO_STATUS_CHANGED') {
+              var videoPayload = mapEventPayload(eventKey, args);
+              logSdkVideoStatusDebug(videoPayload);
+              if (videoPayload && Number(videoPayload.status) === VIDEO_STATUS_LOADED) {
+                applyVideoDisplayMode(true);
+                setTimeout(applyVideoObjectFitToDom, 0);
+                setTimeout(applyVideoObjectFitToDom, 300);
+              }
             }
             if (eventKey === 'TEB_ERROR') {
               updateDebugPanel('boardError', { code: args[0], message: args[1] });
@@ -845,7 +2193,11 @@
               handleH5PptMediaAuthority(eventKey, args);
             }
             if (eventKey === 'TEB_H5PPT_STATUS_CHANGED' || eventKey === 'TEB_H5PPTSTATUSCHANGED') {
+              handleH5PptStatusDiagnostics(eventKey, args);
               applyPptInteractionWhenLoaded(eventKey, args);
+            }
+            if (eventKey === 'TEB_REFRESH') {
+              handleBoardRefreshDiagnostics();
             }
 
             postToFlutter(resolveFlutterEventType(eventKey), mapEventPayload(eventKey, args));
@@ -862,7 +2214,11 @@
         if (board && typeof board.destroy === 'function') board.destroy();
 
         boardReady = false;
+        boardHistoryReady = false;
         playingH5PptMediaId = null;
+        h5PptLoading = false;
+        h5PptLoadingFileId = null;
+        h5PptInternalRefreshCount = 0;
         resetContinuousStrokeState();
         continuousStrokeEnabled = options.continuousStrokeEnabled !== false;
         updateContinuousStrokeTouchAction();
@@ -894,6 +2250,10 @@
           initParams.ratio = options.ratio;
         }
 
+        // 动态 PPT 默认 10s 易在 iframe 握手 + SDK 内部 refresh 重试链中超时
+        initParams.h5PPTLoadTimeout = options.h5PPTLoadTimeout || 60;
+        initParams.h5PPTResourceTimeout = options.h5PPTResourceTimeout || 60;
+
         currentInitOptions = options;
         board = new TEduBoard(initParams);
         bindBoardEvents();
@@ -905,6 +2265,10 @@
         if (board && typeof board.destroy === 'function') board.destroy();
         board = null;
         boardReady = false;
+        boardHistoryReady = false;
+        h5PptLoading = false;
+        h5PptLoadingFileId = null;
+        h5PptInternalRefreshCount = 0;
         resetContinuousStrokeState();
         postToFlutter('boardDestroyed', null);
         updateDebugPanel('boardDestroyed', {});
@@ -924,7 +2288,7 @@
       // 8. window.WhiteboardWebBridge（Flutter 入口）
       // =========================================================================
       var bridgeApi = {
-        version: '1.3.0',
+        version: '1.4.2-h5ppt-ordered-sync',
 
         init: function (options) {
           return safely('init', function () {
@@ -937,6 +2301,9 @@
               currentInitOptions.userId === options.userId &&
               boardReady) {
               return { success: true, reused: true, options: sanitizeOptionsForLog(currentInitOptions) };
+            }
+            if (currentInitOptions && String(currentInitOptions.classId) !== String(options.classId)) {
+              standaloneSyncQueue.length = 0;
             }
             destroyBoard();
             resetSyncChannel(options.classId);
@@ -954,6 +2321,7 @@
               syncChannel = null;
               syncChannelName = '';
             }
+            standaloneSyncQueue.length = 0;
             currentInitOptions = null;
             return { success: true };
           });
@@ -1153,16 +2521,29 @@
 
       function bootstrap() {
         installContinuousStrokeBoundaryGuard();
+        installVideoVisibilityDebug();
+        if (!bridgeConfig.standalone) {
+          updateBoardPlaceholder(null, true);
+        }
         if (bridgeConfig.debug) {
           var debugPanel = document.getElementById(DEBUG_PANEL_ID);
           if (debugPanel) debugPanel.classList.add('is-visible');
         }
 
         window[bridgeConfig.jsBridge] = bridgeApi;
+
+        if (bridgeConfig.standalone) {
+          bootstrapStandalone();
+          window.addEventListener('resize', function () {
+            if (board && typeof board.resize === 'function') board.resize();
+          });
+          return;
+        }
+
         waitForFlutterChannel(function () {
           postToFlutter('webBridgeReady', { bridgeConfig: bridgeConfig });
           updateDebugPanel('Web Bridge Ready', { version: bridgeApi.version });
-        });
+        }, enableStandaloneFallback);
 
         window.addEventListener('resize', function () {
           if (board && typeof board.resize === 'function') board.resize();
