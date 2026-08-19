@@ -198,9 +198,9 @@
     <button type="button" id="sb-im-btn">仅连接 IM</button>
     <button type="button" id="sb-browse-btn">Browse 模式</button>
     <div style="margin-top:8px;color:#64748b;">
-      静态 PPT：历史同步 historyDataSyncCompleted<br>
-      动态 PPT（按钮/动画）：依赖 IM 实时信令 im.addSyncData（App 发 onlineUserOnly，无离线补发）<br>
-      教师点击后 Event Log 应持续出现 im.addSyncData；若无则 IM 未进白板群或 userId 与 App 冲突
+      进「老师的房间」= 填老师的 classId（txWhiteBoardId），<b>不要填老师正在用的 userId</b>（同账号会互踢）。<br>
+      imGroupId 必须等于 txWhiteBoardId，不是直播群 txGroupId。<br>
+      老师端画画后：本页应出现 im.recv → im.addSyncData；本页画画后：应出现 im.send.ok，学生 App 才会动。
     </div>
     <div id="sb-im-stats" style="margin-top:6px;color:#2563eb;font-weight:600;">IM: 未连接</div>
   </div>
@@ -576,6 +576,14 @@
       var STANDALONE_SYNC_QUEUE_MAX = 200;
       var STANDALONE_MESSAGE_ID_CACHE_MAX = 500;
       var STANDALONE_IM_READY_TIMEOUT_MS = 15000;
+      /** 必须用当前页面 origin，不能写相对路径：<base href> 指向 OSS，相对 vendor 会 404。 */
+      var STANDALONE_TIM_SDK_URLS = [
+        (window.location.origin || '') + '/vendor/tim-js.js',
+        'https://unpkg.com/tim-js-sdk@2.27.6/tim-js.js',
+        'https://cdn.jsdelivr.net/npm/tim-js-sdk@2.27.6/tim-js.js'
+      ];
+      var STANDALONE_TIM_SDK_LOAD_TIMEOUT_MS = 8000;
+      var standaloneTimSdkPromise = null;
 
       function updateStandaloneImStats(text) {
         var el = document.getElementById('sb-im-stats');
@@ -683,8 +691,13 @@
       }
 
       function addStandaloneTimHandler(tim, eventKey, handler) {
+        if (!tim || typeof tim.on !== 'function') return;
         var eventName = window.TIM && TIM.EVENT && TIM.EVENT[eventKey];
-        if (!eventName || !tim || typeof tim.on !== 'function') return;
+        if (!eventName) {
+          if (eventKey === 'MESSAGE_RECEIVED') eventName = 'onMessageReceived';
+          else if (eventKey === 'SDK_READY') eventName = 'sdkStateReady';
+          else eventName = eventKey;
+        }
         tim.on(eventName, handler);
         standaloneImHandlers.push({ tim: tim, eventName: eventName, handler: handler });
       }
@@ -735,6 +748,60 @@
           error.stale = true;
           throw error;
         }
+      }
+
+      function loadStandaloneTimSdk(url) {
+        return new Promise(function (resolve, reject) {
+          var script = document.createElement('script');
+          script.src = url;
+          script.async = true;
+          var done = false;
+          var timer = setTimeout(function () {
+            if (done) return;
+            done = true;
+            script.onload = script.onerror = null;
+            reject(new Error('TIM SDK 加载超时: ' + url));
+          }, STANDALONE_TIM_SDK_LOAD_TIMEOUT_MS);
+          script.onload = function () {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            if (window.TIM) resolve(url);
+            else reject(new Error('脚本已加载但 window.TIM 不存在: ' + url));
+          };
+          script.onerror = function () {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            reject(new Error('TIM SDK 加载失败: ' + url));
+          };
+          document.head.appendChild(script);
+        });
+      }
+
+      function ensureStandaloneTimSdk() {
+        if (window.TIM) return Promise.resolve('already');
+        if (standaloneTimSdkPromise) return standaloneTimSdkPromise;
+        standaloneTimSdkPromise = (function next(index) {
+          if (index >= STANDALONE_TIM_SDK_URLS.length) {
+            return Promise.reject(new Error('TIM SDK 全部加载失败（腾讯 CDN / jsdelivr）'));
+          }
+          var url = STANDALONE_TIM_SDK_URLS[index];
+          updateStandaloneImStats('IM: 加载 SDK… ' + url);
+          appendStandaloneEvent('im.sdk.load', { url: url });
+          return loadStandaloneTimSdk(url).then(function (loadedUrl) {
+            appendStandaloneEvent('im.sdk.ready', { url: loadedUrl });
+            return loadedUrl;
+          }).catch(function (error) {
+            appendStandaloneEvent('im.sdk.load.fail', { url: url, message: error && error.message });
+            return next(index + 1);
+          });
+        })(0);
+        standaloneTimSdkPromise = standaloneTimSdkPromise.catch(function (error) {
+          standaloneTimSdkPromise = null;
+          throw error;
+        });
+        return standaloneTimSdkPromise;
       }
 
       function initStandaloneIm(options) {
@@ -867,11 +934,25 @@
             standaloneImJoined = true;
             appendStandaloneEvent('im.joined', {
               groupId: groupId,
+              userId: standaloneImUserId,
               status: status || null,
               ext: 'TXWhiteBoardExt',
-              onlineOnly: true
+              onlineOnly: true,
+              hint: 'userId 必须与老师 App 不同；groupId 必须是 txWhiteBoardId'
             });
-            updateStandaloneImStats('IM: 已进群 ' + groupId + '，等待教师端动态信令…');
+            updateStandaloneImStats('IM: 已进群 ' + groupId + ' / user=' + standaloneImUserId + '，等待信令…');
+            if (typeof tim.getGroupProfile === 'function') {
+              tim.getGroupProfile({ groupID: String(groupId) }).then(function (profileRes) {
+                var group = profileRes && profileRes.data && (profileRes.data.group || profileRes.data);
+                appendStandaloneEvent('im.groupProfile', {
+                  groupId: groupId,
+                  type: group && (group.type || group.groupType),
+                  name: group && (group.name || group.groupName)
+                });
+              }).catch(function (profileErr) {
+                appendStandaloneEvent('im.groupProfile.error', imErrorDetails(profileErr));
+              });
+            }
             return { success: true, groupId: groupId, status: status || null };
           });
         }).catch(function (error) {
@@ -905,11 +986,33 @@
         return s;
       }
 
+      function isGroupConversationType(conversationType) {
+        return conversationType === 'GROUP' ||
+          conversationType === 2 ||
+          conversationType === '2' ||
+          (window.TIM && TIM.TYPES && conversationType === TIM.TYPES.CONV_GROUP);
+      }
+
+      function extractMessageGroupId(message) {
+        if (!message) return '';
+        var conv = String(message.conversationID || '');
+        var fromConv = conv.replace(/^GROUP/i, '').replace(/^group_/i, '');
+        return message.to || message.groupID || fromConv || '';
+      }
+
       function isSameImGroup(messageGroupId, expectedGroupId) {
         if (!expectedGroupId) return true;
-        // 腾讯白板要求只接收当前课堂信令；无法确认群号时宁可丢弃，避免多课堂串板。
-        if (!messageGroupId) return false;
+        if (!messageGroupId) return true;
         return normalizeImGroupId(messageGroupId) === normalizeImGroupId(expectedGroupId);
+      }
+
+      function listStandaloneImMessages(event) {
+        if (!event || event.data == null) return [];
+        var data = event.data;
+        if (Object.prototype.toString.call(data) === '[object Array]') return data;
+        if (data.messageList && data.messageList.length != null) return data.messageList;
+        if (data.messages && data.messages.length != null) return data.messages;
+        return [data];
       }
 
       /** 新版 TIM 使用 message.payload，旧版白板示例使用 getElements()；两者只取其一，避免重复注入。 */
@@ -917,7 +1020,8 @@
         var payloads = [];
         if (!message) return payloads;
 
-        if (message.type === TIM.TYPES.MSG_CUSTOM && message.payload) {
+        var customType = window.TIM && TIM.TYPES && TIM.TYPES.MSG_CUSTOM;
+        if (message.payload && (message.type === customType || message.type === 'TIMCustomElem' || message.payload.data)) {
           payloads.push(message.payload);
           return payloads;
         }
@@ -925,7 +1029,7 @@
         if (typeof message.getElements === 'function') {
           try {
             message.getElements().forEach(function (element) {
-              if (element && element.type === TIM.TYPES.MSG_CUSTOM && element.content) {
+              if (element && (element.type === customType || element.type === 'TIMCustomElem') && element.content) {
                 payloads.push(element.content);
               }
             });
@@ -949,8 +1053,21 @@
         return false;
       }
 
+      function isWhiteboardPayload(payload) {
+        if (!payload) return false;
+        if (payload.extension === 'TXWhiteBoardExt' || payload.ext === 'TXWhiteBoardExt') return true;
+        return extractSyncAction(payload.data) != null;
+      }
+
       function handleStandaloneWhiteboardPayload(payload, message) {
-        if (!payload || payload.extension !== 'TXWhiteBoardExt') return;
+        if (!isWhiteboardPayload(payload)) {
+          appendStandaloneEvent('im.payload.skip', {
+            from: message && message.from,
+            extension: payload && payload.extension,
+            hasData: !!(payload && payload.data)
+          });
+          return;
+        }
         var data = payload.data;
         if (!data) return;
 
@@ -965,6 +1082,7 @@
             from: message && message.from,
             action: action,
             queued: !!(result && result.queued),
+            reason: result && result.reason,
             len: typeof data === 'string' ? data.length : JSON.stringify(data).length
           });
         } catch (e) {
@@ -973,26 +1091,39 @@
       }
 
       function onStandaloneImMessage(event) {
-        if (!event || !event.data) return;
-        var messages = event.data;
-        if (!messages.forEach) messages = [messages];
+        var messages = listStandaloneImMessages(event);
         messages.forEach(function (message) {
-          if (!message || message.conversationType !== TIM.TYPES.CONV_GROUP) return;
-          var msgGroupId = message.to || message.groupID || message.conversationID || '';
-          if (!isSameImGroup(msgGroupId, standaloneImGroupId)) {
-            return;
+          if (!message) return;
+          var msgGroupId = extractMessageGroupId(message);
+          var skip = null;
+          if (!isGroupConversationType(message.conversationType) && message.conversationType != null) {
+            skip = 'not_group:' + String(message.conversationType);
+          } else if (!isSameImGroup(msgGroupId, standaloneImGroupId)) {
+            skip = 'other_group:' + msgGroupId;
+          } else if (message.from && message.from === standaloneImUserId) {
+            skip = 'self';
+          } else if (isDuplicateStandaloneMessage(message)) {
+            skip = 'dup';
           }
-          if (message.from && message.from === standaloneImUserId) return;
-          if (isDuplicateStandaloneMessage(message)) return;
+
+          appendStandaloneEvent('im.recv', {
+            from: message.from,
+            to: message.to,
+            conversationType: message.conversationType,
+            conversationID: message.conversationID,
+            type: message.type,
+            extension: message.payload && message.payload.extension,
+            dataLen: message.payload && message.payload.data ? String(message.payload.data).length : 0,
+            skip: skip
+          });
+          if (skip) return;
 
           var payloads = extractWhiteboardCustomPayloads(message);
           if (!payloads.length) {
-            if (bridgeConfig.debug && message.type === TIM.TYPES.MSG_CUSTOM) {
-              appendStandaloneEvent('im.custom.skip', {
-                from: message.from,
-                extension: message.payload && message.payload.extension
-              });
-            }
+            appendStandaloneEvent('im.custom.empty', {
+              from: message.from,
+              type: message.type
+            });
             return;
           }
           payloads.forEach(function (payload) {
@@ -1002,7 +1133,14 @@
       }
 
       function sendStandaloneImSyncData(payload) {
-        if (!standaloneTim || !standaloneImReady || !standaloneImJoined || !currentInitOptions) return;
+        if (!standaloneTim || !standaloneImReady || !standaloneImJoined || !currentInitOptions) {
+          appendStandaloneEvent('im.send.skip', {
+            ready: standaloneImReady,
+            joined: standaloneImJoined,
+            hasTim: !!standaloneTim
+          });
+          return;
+        }
         var groupId = readStandaloneImGroupId(currentInitOptions);
         var dataStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
         var message = standaloneTim.createCustomMessage({
@@ -1011,7 +1149,9 @@
           priority: TIM.TYPES.MSG_PRIORITY_HIGH,
           payload: { data: dataStr, description: '', extension: 'TXWhiteBoardExt' }
         });
-        standaloneTim.sendMessage(message, { onlineUserOnly: true }).catch(function (err) {
+        standaloneTim.sendMessage(message, { onlineUserOnly: true }).then(function () {
+          appendStandaloneEvent('im.send.ok', { groupId: groupId, len: dataStr.length });
+        }).catch(function (err) {
           appendStandaloneEvent('im.send.error', { message: err && err.message });
         });
       }
@@ -1042,7 +1182,8 @@
           panel.innerHTML = '<strong>Event Log（浏览器）</strong>' + standaloneEventLog.join('\n');
         }
         var watch = ['h5PptStatusChanged', 'boardRefresh', 'historyDataSyncCompleted', 'boardReady', 'boardOffline', 'boardError', 'h5Ppt.url'];
-        if (watch.indexOf(type) >= 0 || (type && type.toLowerCase().indexOf('ppt') >= 0)) {
+        if (watch.indexOf(type) >= 0 || (type && type.toLowerCase().indexOf('ppt') >= 0) ||
+          (type && type.indexOf('im.') === 0)) {
           console.log('[白板诊断]', type, payload);
         }
         if (type === 'boardReady' || type === 'historyDataSyncCompleted') {
@@ -1585,8 +1726,16 @@
       // =========================================================================
       function postToFlutter(type, payload) {
         // standalone + IM：浏览器直连 TIM，与 App 相同 TXWhiteBoardExt 信令
-        if (type === 'syncData' && bridgeConfig.standalone && bridgeConfig.imSync && standaloneTim && standaloneImJoined) {
-          sendStandaloneImSyncData(payload);
+        if (type === 'syncData' && bridgeConfig.standalone && bridgeConfig.imSync) {
+          if (standaloneTim && standaloneImJoined) {
+            sendStandaloneImSyncData(payload);
+          } else {
+            appendStandaloneEvent('im.send.skip', {
+              reason: 'im_not_ready',
+              joined: standaloneImJoined,
+              hasTim: !!standaloneTim
+            });
+          }
         }
         // syncData：App WebView 由 Flutter V2TIM 转发（standalone 未开 IM 时不重复发）
         if (type === 'syncData' && bridgeConfig.debug) {
@@ -2288,7 +2437,7 @@
       // 8. window.WhiteboardWebBridge（Flutter 入口）
       // =========================================================================
       var bridgeApi = {
-        version: '1.4.2-h5ppt-ordered-sync',
+        version: '1.4.2-restore-head-tim',
 
         init: function (options) {
           return safely('init', function () {
